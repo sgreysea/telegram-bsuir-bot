@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 from telegram import Update, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
-USERS_FILE = "users.json"
+USERS_FILE = "users.json"#файл для данных юзеров
 load_dotenv()
 
 logging.basicConfig(
@@ -187,13 +187,11 @@ def format_schedule_day(schedules, weekday_name):
 
     return result
 
-
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "Привет я бот с расписанием БГУИР.\n Установи свою группу через меню",
         reply_markup=get_menu()
     )
-
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     help_text = """
@@ -204,7 +202,6 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 удачи:)
     """
     await update.message.reply_text(help_text, reply_markup=get_menu())
-
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.lower()
@@ -245,7 +242,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if schedules is None:
         await update.message.reply_text("случилась ошиюка, при получении расписания")
         return
-
     weekdays = {
         "Monday": "Понедельник",
         "Tuesday": "Вторник",
@@ -255,53 +251,41 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Saturday": "Суббота",
         "Sunday": "Воскресенье"
     }
-
     if text == "расписание на сегодня":
         weekday_ru = weekdays[datetime.now().strftime("%A")]
         await update.message.reply_text(format_schedule_day(schedules, weekday_ru))
         return
-
     if text == "расписание на завтра":
         weekday_ru = weekdays[(datetime.now() + timedelta(days=1)).strftime("%A")]
         await update.message.reply_text(format_schedule_day(schedules, weekday_ru))
         return
-
     if text == "рассписание на неделю":
         await update.message.reply_text(format_schedule_week(schedules))
         return
-
     if text == "уведомления":
         cur = users[str(user_id)]["notify"]
         users[str(user_id)]["notify"] = not cur
         save_users(users)
-
         if cur:
             await update.message.reply_text("уведомления отключены", reply_markup=get_menu())
         else:
             await update.message.reply_text("уведомления включены", reply_markup=get_menu())
         return
-
     if text == "помощь":
         await help_command(update, context)
 
-
 async def notification_loop(context: ContextTypes.DEFAULT_TYPE):
     app = context.application
-
     now = datetime.now().strftime("%H:%M")
     weekday = datetime.now().strftime("%A")
-
     for user_id, data in users.items():
         if not data["notify"] or not data["group"]:
             continue
-
         schedules = get_shedule(data["group"])
         todays = schedules.get(weekday, [])
-
         if todays:
             first = todays[0]
             start = first["startLessonTime"]
-
             # 10 минут до пары
             t10 = (datetime.strptime(start, "%H:%M") - timedelta(minutes=10)).strftime("%H:%M")
             if now == t10:
@@ -313,9 +297,7 @@ async def notification_loop(context: ContextTypes.DEFAULT_TYPE):
         # уведомления о следующей паре
         for i, lesson in enumerate(todays):
             end_time = lesson["endLessonTime"]
-
             t5 = (datetime.strptime(end_time, "%H:%M") - timedelta(minutes=5)).strftime("%H:%M")
-
             if now == t5:
                 if i + 1 < len(todays):
                     next_lesson = todays[i+1]
@@ -331,24 +313,18 @@ async def notification_loop(context: ContextTypes.DEFAULT_TYPE):
                 except:
                     pass
 
-
-
 async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logging.error(f'ошибка: {context.error}')
-
 
 def main():
     application = Application.builder().token(BOT_TOKEN).build()
 
-    # --- Хендлеры ---
+    # хендлеры 
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     application.add_error_handler(error_handler)
 
-    # --- УВЕДОМЛЕНИЯ ---
-    # JobQueue уже встроен в application, если установлен пакет job-queue!!!
-    # Устанавливаем задачу, которая вызывается каждые 30 секунд
     application.job_queue.run_repeating(
         notification_loop,
         interval=30,   # каждые 30 секунд проверяем
@@ -357,8 +333,6 @@ def main():
 
     print("подождите, бот запускается...")
     application.run_polling()
-
-
 
 if __name__ == '__main__':
     main()
