@@ -29,7 +29,6 @@ logging.basicConfig(
     format="%(asctime)s — %(levelname)s — %(message)s"
 )
 
-# ---------------- USERS ----------------
 
 def load_users():
     if not os.path.exists(USERS_FILE):
@@ -43,9 +42,6 @@ def save_users(data):
 
 users = load_users()
 
-
-# ---------------- MENU ----------------
-
 def get_menu():
     return ReplyKeyboardMarkup([
         ["расписание на сегодня"],
@@ -56,9 +52,6 @@ def get_menu():
         ["помощь"]
     ], resize_keyboard=True)
 
-
-# ---------------- API ----------------
-
 def _http_get_json(url):
     try:
         req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
@@ -67,7 +60,6 @@ def _http_get_json(url):
     except Exception as e:
         logging.error("HTTP Error: %s", e)
         return None
-
 
 def get_current_week():
     try:
@@ -78,7 +70,6 @@ def get_current_week():
     except:
         return None
 
-
 def get_schedule(group):
     url = f"https://iis.bsuir.by/api/v1/schedule?studentGroup={group}"
     data = _http_get_json(url)
@@ -88,24 +79,17 @@ def get_schedule(group):
 
     return data["schedules"]
 
-
-# ---------------- FORMATTERS ----------------
-
 def format_schedule_day(schedules, day):
     week = get_current_week()
     lessons = schedules.get(day, [])
-
     if not lessons:
         return f"{day}: занятий нет"
-
-    text = f"Расписание на {day}:\n\n"
-
+    text = f"расписание на {day}:\n\n"
     for lesson in lessons:
         weeks = lesson.get("weekNumber")
         # check by week
         if isinstance(weeks, list) and week not in weeks:
             continue
-
         text += (
             f"{lesson['startLessonTime']} - {lesson['endLessonTime']} | "
             f"{lesson['subject']} | "
@@ -113,9 +97,8 @@ def format_schedule_day(schedules, day):
         )
     return text
 
-
 def format_schedule_week(schedules):
-    text = "Расписание на неделю:\n\n"
+    text = "расписание на неделю:\n\n"
     for day, lessons in schedules.items():
         text += f"{day}:\n"
         if not lessons:
@@ -131,12 +114,9 @@ def format_schedule_week(schedules):
         text += "\n"
     return text
 
-
-# ---------------- COMMANDS ----------------
-
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "Привет! Установи свою группу.", reply_markup=get_menu()
+        "привет, чтобы работать с ботом надо установить группу", reply_markup=get_menu()
     )
 
 async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -148,23 +128,20 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=get_menu()
     )
 
-
-# ---------------- HANDLER ----------------
-
 async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.lower()
     uid = str(update.message.from_user.id)
 
     if text == "установить группу":
         context.user_data["await_group"] = True
-        await update.message.reply_text("Введи номер группы:")
+        await update.message.reply_text("введи номер группы:")
         return
 
     if context.user_data.get("await_group"):
         group = text
         sched = get_schedule(group)
         if not sched:
-            await update.message.reply_text("Группа не найдена.")
+            await update.message.reply_text("группа не найдена.")
             return
 
         users[uid] = {"group": group, "notify": False}
@@ -175,13 +152,13 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if uid not in users:
-        await update.message.reply_text("Сначала установи группу.")
+        await update.message.reply_text("сначала установи группу.")
         return
 
     group = users[uid]["group"]
     sched = get_schedule(group)
     if not sched:
-        await update.message.reply_text("Ошибка загрузки расписания.")
+        await update.message.reply_text("ошибка загрузки расписания")
         return
 
     ru = {
@@ -212,7 +189,7 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
         users[uid]["notify"] = not users[uid]["notify"]
         save_users(users)
         await update.message.reply_text(
-            "Уведомления включены" if users[uid]["notify"] else "Уведомления отключены",
+            "уведомления включены" if users[uid]["notify"] else "уведомления отключены",
             reply_markup=get_menu()
         )
         return
@@ -220,8 +197,6 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if text == "помощь":
         await help_cmd(update, context)
 
-
-# ---------------- JOBS (NOTIFICATIONS) ----------------
 
 async def notifications(context: ContextTypes.DEFAULT_TYPE):
     now = datetime.now().strftime("%H:%M")
@@ -241,26 +216,21 @@ async def notifications(context: ContextTypes.DEFAULT_TYPE):
         before10 = (datetime.strptime(first, "%H:%M") - timedelta(minutes=10)).strftime("%H:%M")
 
         if now == before10:
-            await context.bot.send_message(chat_id=int(uid), text="Через 10 минут первая пара!")
+            await context.bot.send_message(chat_id=int(uid), text="через 10 минут первая пара!")
 
 
 def main():
-    """Точка входа. Запускает бота."""
-    # 1. Создаем приложение
     app = Application.builder().token(BOT_TOKEN).build()
     
-    # 2. Регистрируем обработчики
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_cmd))
     app.add_handler(MessageHandler(filters.TEXT, handle))
     
-    # 3. Запускаем фоновые задачи (JobQueue)
     app.job_queue.run_repeating(notifications, interval=30, first=10)
     
-    # 4. Запускаем бота в режиме polling
-    print("Бот запускается...")
+    print("бот запускается...")
     app.run_polling()
 
 if __name__ == "__main__":
-    # Простой синхронный запуск
+
     main()
