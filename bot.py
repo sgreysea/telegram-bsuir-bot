@@ -16,7 +16,11 @@ logging.basicConfig(
     level=logging.INFO
 )
 
-BOT_TOKEN = "8275961957:AAFzaPWHCzhQm2OC5vPrBqdeveD9J1uUkL8"
+import os
+BOT_TOKEN = os.getenv('BOT_TOKEN')
+if not BOT_TOKEN:
+    logging.error("BOT_TOKEN не установлен!")
+    exit(1)
 
 user_groups = {}
 
