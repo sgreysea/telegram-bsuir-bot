@@ -244,9 +244,7 @@ async def notifications(context: ContextTypes.DEFAULT_TYPE):
             await context.bot.send_message(chat_id=int(uid), text="Через 10 минут первая пара!")
 
 
-# ---------------- MAIN ----------------
-
-async def main():
+if __name__ == "__main__":
     app = Application.builder().token(BOT_TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
@@ -257,9 +255,4 @@ async def main():
     app.job_queue.run_repeating(notifications, interval=30, first=10)
 
     print("Бот запущен...")
-    await app.run_polling()
-
-
-if __name__ == "__main__":
-    import sys
-    sys.exit(main())
+    app.run_polling()
