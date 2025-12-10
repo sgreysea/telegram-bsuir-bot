@@ -320,24 +320,27 @@ async def notification_loop(context: ContextTypes.DEFAULT_TYPE):
 async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logging.error(f'ошибка: {context.error}')
 
-def main():
+async def main():
     application = Application.builder().token(BOT_TOKEN).build()
-    application.run_polling()
-    # регистрация обработчиков
+    # команды
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("help", help_command))
+    # сообщения
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    # ошибки
     application.add_error_handler(error_handler)
-  
+    # уведомления
     application.job_queue.run_repeating(
-        notification_loop,   
-        interval=30,         # интервал в секундах
-        first=5              # через сколько стартовать впервые
+        notification_loop,
+        interval=30,
+        first=5
     )
+    # запуск бота 
+    await application.initialize()
+    await application.start()
+    print("бот запущен...")
 
-    print("подождите, бот запускается...")
-    application.run_polling()
-
+    await application.run_polling()
 
 if __name__ == '__main__':
-    main()
+    asyncio.run(main())
