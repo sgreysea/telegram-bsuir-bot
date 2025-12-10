@@ -244,15 +244,23 @@ async def notifications(context: ContextTypes.DEFAULT_TYPE):
             await context.bot.send_message(chat_id=int(uid), text="Через 10 минут первая пара!")
 
 
-if __name__ == "__main__":
+def main():
+    """Точка входа. Запускает бота."""
+    # 1. Создаем приложение
     app = Application.builder().token(BOT_TOKEN).build()
-
+    
+    # 2. Регистрируем обработчики
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_cmd))
     app.add_handler(MessageHandler(filters.TEXT, handle))
-
-    # START NOTIFICATION LOOP
+    
+    # 3. Запускаем фоновые задачи (JobQueue)
     app.job_queue.run_repeating(notifications, interval=30, first=10)
-
-    print("Бот запущен...")
+    
+    # 4. Запускаем бота в режиме polling
+    print("Бот запускается...")
     app.run_polling()
+
+if __name__ == "__main__":
+    # Простой синхронный запуск
+    main()
