@@ -2,6 +2,7 @@ import os
 import json
 import logging
 import asyncio
+import urllib.request
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 
@@ -16,17 +17,19 @@ from telegram.ext import (
 
 load_dotenv()
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-)
-
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 if not BOT_TOKEN:
-    raise SystemExit("❌ BOT_TOKEN отсутствует!")
+    print("ERROR: BOT_TOKEN not found in .env")
+    exit(1)
 
 USERS_FILE = "users.json"
 
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s — %(levelname)s — %(message)s"
+)
+
+# ---------------- USERS ----------------
 
 def load_users():
     if not os.path.exists(USERS_FILE):
@@ -34,165 +37,193 @@ def load_users():
     with open(USERS_FILE, "r", encoding="utf-8") as f:
         return json.load(f)
 
-
-def save_users(users):
+def save_users(data):
     with open(USERS_FILE, "w", encoding="utf-8") as f:
-        json.dump(users, f, indent=4, ensure_ascii=False)
-
+        json.dump(data, f, indent=4, ensure_ascii=False)
 
 users = load_users()
 
 
+# ---------------- MENU ----------------
+
 def get_menu():
-    k = [
-        [KeyboardButton("расписание на сегодня")],
-        [KeyboardButton("расписание на завтра")],
-        [KeyboardButton("рассписание на неделю")],
-        [KeyboardButton("уведомления")],
-        [KeyboardButton("установить группу")],
-        [KeyboardButton("помощь")],
-    ]
-    return ReplyKeyboardMarkup(k, resize_keyboard=True)
+    return ReplyKeyboardMarkup([
+        ["расписание на сегодня"],
+        ["расписание на завтра"],
+        ["рассписание на неделю"],
+        ["уведомления"],
+        ["установить группу"],
+        ["помощь"]
+    ], resize_keyboard=True)
 
 
-# ============ API Функции (оставляю как есть, ты вставишь свои) ===========
-
-import urllib.request
-
+# ---------------- API ----------------
 
 def _http_get_json(url):
     try:
         req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-        with urllib.request.urlopen(req) as response:
-            return json.loads(response.read().decode("utf-8"))
-    except:
+        with urllib.request.urlopen(req, timeout=10) as r:
+            return json.loads(r.read().decode("utf-8"))
+    except Exception as e:
+        logging.error("HTTP Error: %s", e)
         return None
 
 
 def get_current_week():
     try:
-        with urllib.request.urlopen("https://iis.bsuir.by/api/v1/schedule/current-week") as r:
+        with urllib.request.urlopen(
+            "https://iis.bsuir.by/api/v1/schedule/current-week"
+        ) as r:
             return int(r.read().decode("utf-8"))
     except:
         return None
 
 
-def get_shedule_for_variant(group):
+def get_schedule(group):
     url = f"https://iis.bsuir.by/api/v1/schedule?studentGroup={group}"
-    return _http_get_json(url)
+    data = _http_get_json(url)
+
+    if not data or "schedules" not in data:
+        return None
+
+    return data["schedules"]
 
 
-def get_shedule(group):
-    for g in [group, f"0{group}"]:
-        data = get_shedule_for_variant(g)
-        if data and "schedules" in data:
-            return data["schedules"]
-    return None
-
+# ---------------- FORMATTERS ----------------
 
 def format_schedule_day(schedules, day):
-    if day not in schedules:
-        return f"{day} — нет пар"
+    week = get_current_week()
+    lessons = schedules.get(day, [])
 
-    lessons = schedules[day]
-    res = f"расписание на {day}:\n\n"
-    for l in lessons:
-        res += f"{l['startLessonTime']} - {l['endLessonTime']} | {l['subject']}\n"
-    return res
+    if not lessons:
+        return f"{day}: занятий нет"
+
+    text = f"Расписание на {day}:\n\n"
+
+    for lesson in lessons:
+        weeks = lesson.get("weekNumber")
+        # check by week
+        if isinstance(weeks, list) and week not in weeks:
+            continue
+
+        text += (
+            f"{lesson['startLessonTime']} - {lesson['endLessonTime']} | "
+            f"{lesson['subject']} | "
+            f"{', '.join(lesson.get('auditories', []))}\n"
+        )
+    return text
 
 
 def format_schedule_week(schedules):
-    res = "расписание на неделю:\n\n"
+    text = "Расписание на неделю:\n\n"
     for day, lessons in schedules.items():
-        res += f"{day}:\n"
-        for l in lessons:
-            res += f"  {l['startLessonTime']} - {l['endLessonTime']} | {l['subject']}\n"
-        res += "\n"
-    return res
+        text += f"{day}:\n"
+        if not lessons:
+            text += "  нет занятий\n\n"
+            continue
+
+        for lesson in lessons:
+            text += (
+                f"  {lesson['startLessonTime']} - {lesson['endLessonTime']} | "
+                f"{lesson['subject']} | "
+                f"{', '.join(lesson.get('auditories', []))}\n"
+            )
+        text += "\n"
+    return text
 
 
-# ===================== HANDLERS ======================
+# ---------------- COMMANDS ----------------
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "Привет! Установи группу через меню ↓",
-        reply_markup=get_menu(),
+        "Привет! Установи свою группу.", reply_markup=get_menu()
     )
-
 
 async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "1) Нажми «установить группу»\n"
-        "2) Введи номер группы\n"
-        "3) Используй меню!"
+        "ИНСТРУКЦИЯ:\n"
+        "1. нажми «установить группу»\n"
+        "2. введи номер\n"
+        "3. пользуйся меню\n\n",
+        reply_markup=get_menu()
     )
 
 
-async def handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# ---------------- HANDLER ----------------
+
+async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.lower()
     uid = str(update.message.from_user.id)
 
     if text == "установить группу":
         context.user_data["await_group"] = True
-        return await update.message.reply_text("Введите вашу группу:")
+        await update.message.reply_text("Введи номер группы:")
+        return
 
     if context.user_data.get("await_group"):
         group = text
-        sch = get_shedule(group)
-        if sch is None:
-            return await update.message.reply_text("Такой группы нет!")
+        sched = get_schedule(group)
+        if not sched:
+            await update.message.reply_text("Группа не найдена.")
+            return
 
         users[uid] = {"group": group, "notify": False}
         save_users(users)
 
         context.user_data["await_group"] = False
-        return await update.message.reply_text(
-            f"Группа {group} сохранена!",
-            reply_markup=get_menu(),
-        )
+        await update.message.reply_text(f"Группа {group} сохранена!", reply_markup=get_menu())
+        return
 
     if uid not in users:
-        return await update.message.reply_text("Сначала установите группу!")
+        await update.message.reply_text("Сначала установи группу.")
+        return
 
     group = users[uid]["group"]
-    schedules = get_shedule(group)
+    sched = get_schedule(group)
+    if not sched:
+        await update.message.reply_text("Ошибка загрузки расписания.")
+        return
 
-    weekdays = {
-        "Monday": "Понедельник",
-        "Tuesday": "Вторник",
-        "Wednesday": "Среда",
-        "Thursday": "Четверг",
-        "Friday": "Пятница",
-        "Saturday": "Суббота",
-        "Sunday": "Воскресенье",
+    ru = {
+        "monday": "Понедельник",
+        "tuesday": "Вторник",
+        "wednesday": "Среда",
+        "thursday": "Четверг",
+        "friday": "Пятница",
+        "saturday": "Суббота",
+        "sunday": "Воскресенье",
     }
 
     if text == "расписание на сегодня":
-        today = weekdays[datetime.now().strftime("%A")]
-        return await update.message.reply_text(format_schedule_day(schedules, today))
+        d = ru[datetime.now().strftime("%A").lower()]
+        await update.message.reply_text(format_schedule_day(sched, d))
+        return
 
     if text == "расписание на завтра":
-        tomorrow = weekdays[(datetime.now() + timedelta(days=1)).strftime("%A")]
-        return await update.message.reply_text(format_schedule_day(schedules, tomorrow))
+        d = ru[(datetime.now() + timedelta(days=1)).strftime("%A").lower()]
+        await update.message.reply_text(format_schedule_day(sched, d))
+        return
 
     if text == "рассписание на неделю":
-        return await update.message.reply_text(format_schedule_week(schedules))
+        await update.message.reply_text(format_schedule_week(sched))
+        return
 
     if text == "уведомления":
         users[uid]["notify"] = not users[uid]["notify"]
         save_users(users)
-
-        if users[uid]["notify"]:
-            return await update.message.reply_text("Уведомления включены")
-        return await update.message.reply_text("Уведомления отключены")
+        await update.message.reply_text(
+            "Уведомления включены" if users[uid]["notify"] else "Уведомления отключены",
+            reply_markup=get_menu()
+        )
+        return
 
     if text == "помощь":
-        return await help_cmd(update, context)
+        await help_cmd(update, context)
 
 
-# ===================== JOB QUEUE ======================
+# ---------------- JOBS (NOTIFICATIONS) ----------------
 
-async def notify_job(context: ContextTypes.DEFAULT_TYPE):
+async def notifications(context: ContextTypes.DEFAULT_TYPE):
     now = datetime.now().strftime("%H:%M")
     weekday = datetime.now().strftime("%A")
 
@@ -200,36 +231,33 @@ async def notify_job(context: ContextTypes.DEFAULT_TYPE):
         if not data["notify"]:
             continue
 
-        sch = get_shedule(data["group"])
-        lessons = sch.get(weekday, [])
+        sched = get_schedule(data["group"])
+        lessons = sched.get(weekday, [])
+
         if not lessons:
             continue
 
-        first = lessons[0]
-        start = first["startLessonTime"]
-        before10 = (datetime.strptime(start, "%H:%M") - timedelta(minutes=10)).strftime("%H:%M")
+        first = lessons[0]["startLessonTime"]
+        before10 = (datetime.strptime(first, "%H:%M") - timedelta(minutes=10)).strftime("%H:%M")
 
         if now == before10:
-            await context.bot.send_message(uid, "Через 10 минут первая пара!")
+            await context.bot.send_message(chat_id=int(uid), text="Через 10 минут первая пара!")
 
-# ===================== MAIN ======================
 
+# ---------------- MAIN ----------------
 
 async def main():
-    application = (
-        Application.builder()
-        .token(BOT_TOKEN)
-        .build()
-    )
+    app = Application.builder().token(BOT_TOKEN).build()
 
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("help", help_cmd))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handler))
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("help", help_cmd))
+    app.add_handler(MessageHandler(filters.TEXT, handle))
 
-    application.job_queue.run_repeating(notify_job, interval=30, first=10)
+    # START NOTIFICATION LOOP
+    app.job_queue.run_repeating(notifications, interval=30, first=10)
 
     print("Бот запущен...")
-    await application.run_polling()
+    await app.run_polling()
 
 
 if __name__ == "__main__":
