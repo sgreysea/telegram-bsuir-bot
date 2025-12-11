@@ -6,7 +6,7 @@ import urllib.request
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 
-from flask import Flask
+from flask import Flask, request
 from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import (
     Application,
@@ -30,16 +30,16 @@ logging.basicConfig(
     format="%(asctime)s — %(levelname)s — %(message)s"
 )
 
-# ============= FLASK (для Render порта) =============
+# ============= FLASK APP =============
 
 app = Flask(__name__)
 
-@app.get("/")
-def home():
-    return "Bot is running!"
+# ============= TELEGRAM APP (глобально) =============
 
-# ====================================================
+# Создаем Telegram Application глобально
+telegram_app = Application.builder().token(BOT_TOKEN).build()
 
+# ============= РАБОТА С ПОЛЬЗОВАТЕЛЯМИ =============
 
 def load_users():
     if not os.path.exists(USERS_FILE):
@@ -47,14 +47,13 @@ def load_users():
     with open(USERS_FILE, "r", encoding="utf-8") as f:
         return json.load(f)
 
-
 def save_users(data):
     with open(USERS_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=4, ensure_ascii=False)
 
-
 users = load_users()
 
+# ============= ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ =============
 
 def get_menu():
     return ReplyKeyboardMarkup([
@@ -66,7 +65,6 @@ def get_menu():
         ["помощь"]
     ], resize_keyboard=True)
 
-
 def _http_get_json(url):
     try:
         req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
@@ -75,7 +73,6 @@ def _http_get_json(url):
     except Exception as e:
         logging.error("HTTP Error: %s", e)
         return None
-
 
 def get_current_week():
     try:
@@ -86,14 +83,12 @@ def get_current_week():
     except:
         return None
 
-
 def get_schedule(group):
     url = f"https://iis.bsuir.by/api/v1/schedule?studentGroup={group}"
     data = _http_get_json(url)
     if not data or "schedules" not in data:
         return None
     return data["schedules"]
-
 
 DAY_RU = {
     "Monday": "Понедельник",
@@ -104,7 +99,6 @@ DAY_RU = {
     "Saturday": "Суббота",
     "Sunday": "Воскресенье",
 }
-
 
 def format_schedule_day(schedules, eng_day):
     week = get_current_week()
@@ -124,7 +118,6 @@ def format_schedule_day(schedules, eng_day):
         )
     return text
 
-
 def format_schedule_week(schedules):
     text = "Расписание на неделю:\n\n"
     for day, lessons in schedules.items():
@@ -142,8 +135,7 @@ def format_schedule_week(schedules):
         text += "\n"
     return text
 
-
-# ================= HANDLERS ======================
+# ================= ОБРАБОТЧИКИ ТЕЛЕГРАМ ======================
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
@@ -151,13 +143,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=get_menu()
     )
 
-
 async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "ИНСТРУКЦИЯ:\n1. нажми «установить группу»\n2. введи номер\n3. пользуйся меню",
         reply_markup=get_menu()
     )
-
 
 async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.lower()
@@ -221,50 +211,126 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if text == "помощь":
         await help_cmd(update, context)
 
-
 async def notifications(context: ContextTypes.DEFAULT_TYPE):
-    now = datetime.now().strftime("%H:%M")
-    weekday = datetime.now().strftime("%A")
+    now = datetime.now()
+    current_time = now.strftime("%H:%M")
+    current_weekday = now.strftime("%A")
 
     for uid, data in users.items():
-        if not data["notify"]:
+        if not data.get("notify", False):
             continue
 
-        sched = get_schedule(data["group"])
-        lessons = sched.get(weekday, [])
-
-        if not lessons:
+        user_group = data.get("group")
+        if not user_group:
             continue
 
-        first = lessons[0]["startLessonTime"]
-        before10 = (datetime.strptime(first, "%H:%M") - timedelta(minutes=10)).strftime("%H:%M")
+        schedules = get_schedule(user_group)
+        if not schedules:
+            continue
 
-        if now == before10:
-            await context.bot.send_message(chat_id=int(uid), text="через 10 минут первая пара!")
+        today_lessons = schedules.get(current_weekday, [])
+        if not today_lessons:
+            continue
 
+        first_lesson = today_lessons[0]
+        first_lesson_start_str = first_lesson.get("startLessonTime")
 
-# ================== MAIN (единый asyncio loop) ===========================
+        if not first_lesson_start_str:
+            continue
 
-async def main():
-    application = Application.builder().token(BOT_TOKEN).build()
+        try:
+            first_lesson_start = datetime.strptime(first_lesson_start_str, "%H:%M").replace(
+                year=now.year, month=now.month, day=now.day
+            )
+            notification_time = first_lesson_start - timedelta(minutes=10)
+            time_diff = abs((now - notification_time).total_seconds())
 
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("help", help_cmd))
-    application.add_handler(MessageHandler(filters.TEXT, handle))
+            if time_diff <= 30:
+                try:
+                    await context.bot.send_message(
+                        chat_id=int(uid),
+                        text=f"🧑‍🏫 Через 10 минут первая пара!\n📚 {first_lesson.get('subject', 'Предмет')}\n📍 Ауд: {', '.join(first_lesson.get('auditories', ['не указана']))}"
+                    )
+                except Exception as e:
+                    logging.error(f"Ошибка отправки уведомления пользователю {uid}: {e}")
+        except Exception as e:
+            logging.error(f"Ошибка обработки времени для пользователя {uid}: {e}")
 
-    application.job_queue.run_repeating(notifications, interval=30, first=10)
+# ================== WEBHOOK РОУТЫ ========================
 
-    await application.initialize()
-    await application.start()
+@app.post("/webhook")
+async def webhook():
+    """Основной эндпоинт для получения обновлений от Telegram"""
+    if request.is_json:
+        try:
+            data = await request.get_json()
+            update = Update.de_json(data, telegram_app.bot)
+            await telegram_app.process_update(update)
+            return "", 200
+        except Exception as e:
+            logging.error(f"Ошибка обработки webhook: {e}")
+            return "error", 400
+    return "bad request", 400
 
-    print("Bot started!")
+@app.get("/")
+def home():
+    return "🤖 Telegram Bot is running!<br><br>" \
+           "<a href='/set_webhook'>/set_webhook</a> - настроить вебхук<br>" \
+           "<a href='/delete_webhook'>/delete_webhook</a> - удалить вебхук"
 
-    # Flask запускаем в том же event loop
-    port = int(os.environ.get("PORT", 5000))
-    loop = asyncio.get_running_loop()
-    await loop.run_in_executor(None, lambda: app.run(host="0.0.0.0", port=port, debug=False))
+@app.get("/set_webhook")
+async def set_webhook_route():
+    """Настроить вебхук (вызовите один раз после деплоя)"""
+    webhook_url = f"https://{request.host}/webhook"
+    try:
+        success = await telegram_app.bot.set_webhook(webhook_url)
+        return {
+            "status": "success" if success else "failed",
+            "webhook_url": webhook_url,
+            "message": "Webhook установлен" if success else "Не удалось установить webhook"
+        }
+    except Exception as e:
+        return {"status": "error", "message": str(e)}, 500
 
-    await application.stop()
+@app.get("/delete_webhook")
+async def delete_webhook_route():
+    """Удалить вебхук"""
+    try:
+        success = await telegram_app.bot.delete_webhook()
+        return {
+            "status": "success" if success else "failed",
+            "message": "Webhook удален" if success else "Не удалось удалить webhook"
+        }
+    except Exception as e:
+        return {"status": "error", "message": str(e)}, 500
+
+# ================== ЗАПУСК ПРИЛОЖЕНИЯ ========================
+
+async def setup_telegram_app():
+    """Настройка Telegram приложения"""
+    # Регистрируем обработчики
+    telegram_app.add_handler(CommandHandler("start", start))
+    telegram_app.add_handler(CommandHandler("help", help_cmd))
+    telegram_app.add_handler(MessageHandler(filters.TEXT, handle))
+    
+    # Запускаем задачу уведомлений
+    telegram_app.job_queue.run_repeating(notifications, interval=30, first=10)
+    
+    # Инициализируем приложение
+    await telegram_app.initialize()
+    await telegram_app.start()
+    
+    logging.info("✅ Telegram Application инициализирован")
+
+def run_app():
+    """Запуск Flask приложения"""
+    port = int(os.environ.get("PORT", 10000))
+    logging.info(f"🚀 Запуск Flask сервера на порту {port}")
+    app.run(host="0.0.0.0", port=port, debug=False)
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    # Запускаем настройку Telegram приложения
+    asyncio.run(setup_telegram_app())
+    
+    # Запускаем Flask сервер
+    run_app()
