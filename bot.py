@@ -98,72 +98,20 @@ def format_schedule_day(schedules, day):
     return text
 
 def format_schedule_week(schedules):
-    """Расписание на неделю ТОЛЬКО на текущую неделю"""
-    current_week = get_current_week()
-    
-    text = "расписание на неделю"
-    if current_week:
-        text += f" (неделя {current_week})"
-    text += ":\n\n"
-    
-    # Правильный порядок дней
-    days_order = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
-    
-    for day in days_order:
-        ru_day = {
-            "monday": "Понедельник",
-            "tuesday": "Вторник", 
-            "wednesday": "Среда",
-            "thursday": "Четверг",
-            "friday": "Пятница",
-            "saturday": "Суббота",
-            "sunday": "Воскресенье"
-        }.get(day, day)
-        
-        lessons = schedules.get(day, [])
-        text += f"{ru_day}:\n"
-        
+    text = "расписание на неделю:\n\n"
+    for day, lessons in schedules.items():
+        text += f"{day}:\n"
         if not lessons:
             text += "  нет занятий\n\n"
             continue
-        
-        # ФИЛЬТРУЕМ по текущей неделе
-        filtered_lessons = []
+
         for lesson in lessons:
-            weeks = lesson.get("weekNumber")
-            
-            # Если нет информации о неделях - показываем
-            if weeks is None:
-                filtered_lessons.append(lesson)
-                continue
-            
-            # Если неделя как список [1, 3, 5]
-            if isinstance(weeks, list):
-                if current_week in weeks:
-                    filtered_lessons.append(lesson)
-            # Если неделя как число 1
-            else:
-                # Пробуем преобразовать в число
-                try:
-                    week_num = int(weeks)
-                    if week_num == current_week:
-                        filtered_lessons.append(lesson)
-                except:
-                    # Если не получается - показываем
-                    filtered_lessons.append(lesson)
-        
-        if not filtered_lessons:
-            text += "  нет занятий на этой неделе\n\n"
-            continue
-        
-        for lesson in filtered_lessons:
             text += (
                 f"  {lesson['startLessonTime']} - {lesson['endLessonTime']} | "
                 f"{lesson['subject']} | "
                 f"{', '.join(lesson.get('auditories', []))}\n"
             )
         text += "\n"
-    
     return text
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
