@@ -93,7 +93,9 @@ def get_schedule(group):
     data = _http_get_json(url)
     if not data or "schedules" not in data:
         return None
-    return data["schedules"]
+    # нормализуем ключи → в нижний регистр
+    normalized = {day.lower(): lessons for day, lessons in data["schedules"].items()}
+    return normalized
 
 DAY_RU = {
     "monday": "Понедельник",
