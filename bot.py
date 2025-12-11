@@ -195,42 +195,19 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
     }
 
     if text == "расписание на сегодня":
-        # Получаем день в нижнем регистре
-        day_key = datetime.now().strftime("%A").lower()  # "monday"
-        ru_day = ru.get(day_key, day_key)
-        
-        # Проверяем, есть ли расписание на этот день
-        if day_key not in sched:
-            current_week = get_current_week()
-            week_info = f" (неделя {current_week})" if current_week else ""
-            await update.message.reply_text(f"{ru_day}{week_info}: занятий нет")
-            return
-            
-        schedule_text = format_schedule_day(sched, day_key, ru_day)
-        await update.message.reply_text(schedule_text)
+        d = ru[datetime.now().strftime("%A").lower()]
+        await update.message.reply_text(format_schedule_day(sched, d))
         return
 
     if text == "расписание на завтра":
-        # Получаем завтрашний день в нижнем регистре
-        tomorrow = datetime.now() + timedelta(days=1)
-        day_key = tomorrow.strftime("%A").lower()  # "tuesday"
-        ru_day = ru.get(day_key, day_key)
-        
-        # Проверяем, есть ли расписание на этот день
-        if day_key not in sched:
-            current_week = get_current_week()
-            week_info = f" (неделя {current_week})" if current_week else ""
-            await update.message.reply_text(f"{ru_day}{week_info}: занятий нет")
-            return
-            
-        schedule_text = format_schedule_day(sched, day_key, ru_day)
-        await update.message.reply_text(schedule_text)
+        d = ru[(datetime.now() + timedelta(days=1)).strftime("%A").lower()]
+        await update.message.reply_text(format_schedule_day(sched, d))
         return
 
     if text == "рассписание на неделю":
-        schedule_text = format_schedule_week(sched)
-        await update.message.reply_text(schedule_text)
+        await update.message.reply_text(format_schedule_week(sched))
         return
+
 
     if text == "уведомления":
         users[uid]["notify"] = not users[uid]["notify"]
@@ -250,39 +227,6 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Используйте меню для навигации",
         reply_markup=get_menu()
     )
-    if text == "расписание на завтра":
-        # Получаем завтрашний день в нижнем регистре
-        tomorrow = datetime.now() + timedelta(days=1)
-        day_key = tomorrow.strftime("%A").lower()  # "tuesday"
-        ru_day = ru.get(day_key, day_key)
-        
-        # Проверяем, есть ли расписание на этот день
-        if day_key not in sched:
-            current_week = get_current_week()
-            week_info = f" (неделя {current_week})" if current_week else ""
-            await update.message.reply_text(f"{ru_day}{week_info}: занятий нет")
-            return
-            
-        schedule_text = format_schedule_day(sched, day_key, ru_day)
-        await update.message.reply_text(schedule_text)
-        return
-
-    if text == "рассписание на неделю":
-        schedule_text = format_schedule_week(sched)
-        await update.message.reply_text(schedule_text)
-        return
-
-    if text == "уведомления":
-        users[uid]["notify"] = not users[uid]["notify"]
-        save_users(users)
-        await update.message.reply_text(
-            "уведомления включены" if users[uid]["notify"] else "уведомления отключены",
-            reply_markup=get_menu()
-        )
-        return
-
-    if text == "помощь":
-        await help_cmd(update, context)
 
 async def notifications(context: ContextTypes.DEFAULT_TYPE):
     now = datetime.now()
