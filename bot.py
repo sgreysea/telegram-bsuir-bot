@@ -1,13 +1,10 @@
 import os
 import json
 import logging
-import asyncio
 import urllib.request
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
-import threading
 
-from flask import Flask
 from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import (
     Application,
@@ -15,13 +12,26 @@ from telegram.ext import (
     MessageHandler,
     ContextTypes,
     filters,
-)
+)from flask import Flask
+import threading
+web_app = Flask(__name__)
 
+@web_app.route('/')
+def home():
+    return 'Bot is running!'
+
+@web_app.route('/health')
+def health():
+    return {'status': 'ok'}, 200
+
+def run_web():
+    """Запуск Flask в отдельном потоке"""
+    web_app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 8080)))
 load_dotenv()
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 if not BOT_TOKEN:
-    print("ERROR: BOT_TOKEN not found")
+    print("ERROR: BOT_TOKEN not found in .env")
     exit(1)
 
 USERS_FILE = "users.json"
@@ -30,12 +40,6 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s — %(levelname)s — %(message)s"
 )
-
-app = Flask(__name__)
-
-@app.route("/")
-def home():
-    return "Bot is running", 200
 
 def load_users():
     if not os.path.exists(USERS_FILE):
@@ -94,6 +98,7 @@ def format_schedule_day(schedules, day):
     text = f"расписание на {day}:\n\n"
     for lesson in lessons:
         weeks = lesson.get("weekNumber")
+        # check by week
         if isinstance(weeks, list) and week not in weeks:
             continue
         text += (
@@ -110,6 +115,7 @@ def format_schedule_week(schedules):
         if not lessons:
             text += "  нет занятий\n\n"
             continue
+
         for lesson in lessons:
             text += (
                 f"  {lesson['startLessonTime']} - {lesson['endLessonTime']} | "
@@ -126,7 +132,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "ИНСТРУКЦИЯ:\n1. нажми «установить группу»\n2. введи номер\n3. пользуйся меню\n\n",
+        "ИНСТРУКЦИЯ:\n"
+        "1. нажми «установить группу»\n"
+        "2. введи номер\n"
+        "3. пользуйся меню\n\n",
         reply_markup=get_menu()
     )
 
@@ -148,6 +157,7 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         users[uid] = {"group": group, "notify": False}
         save_users(users)
+
         context.user_data["await_group"] = False
         await update.message.reply_text(f"Группа {group} сохранена!", reply_markup=get_menu())
         return
@@ -199,65 +209,40 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await help_cmd(update, context)
 
 async def notifications(context: ContextTypes.DEFAULT_TYPE):
-    now = datetime.now()
-    current_weekday = now.strftime("%A").lower()
+    now = datetime.now().strftime("%H:%M")
+    weekday = datetime.now().strftime("%A")
 
     for uid, data in users.items():
-        if not data.get("notify", False):
+        if not data["notify"]:
             continue
 
-        user_group = data.get("group")
-        if not user_group:
+        sched = get_schedule(data["group"])
+        lessons = sched.get(weekday, [])
+
+        if not lessons:
             continue
 
-        schedules = get_schedule(user_group)
-        if not schedules:
-            continue
+        first = lessons[0]["startLessonTime"]
+        before10 = (datetime.strptime(first, "%H:%M") - timedelta(minutes=10)).strftime("%H:%M")
 
-        today_lessons = schedules.get(current_weekday, [])
-        if not today_lessons:
-            continue
+        if now == before10:
+            await context.bot.send_message(chat_id=int(uid), text="через 10 минут первая пара!")
 
-        first_lesson = today_lessons[0]
-        first_lesson_start_str = first_lesson.get("startLessonTime")
-
-        if not first_lesson_start_str:
-            continue
-
-        try:
-            first_lesson_start = datetime.strptime(first_lesson_start_str, "%H:%M").replace(
-                year=now.year, month=now.month, day=now.day
-            )
-            notification_time = first_lesson_start - timedelta(minutes=10)
-            time_diff = abs((now - notification_time).total_seconds())
-
-            if time_diff <= 30:
-                try:
-                    await context.bot.send_message(
-                        chat_id=int(uid),
-                        text=f"Через 10 минут первая пара!\n{first_lesson.get('subject', 'Предмет')}\nАуд: {', '.join(first_lesson.get('auditories', ['не указана']))}"
-                    )
-                except Exception as e:
-                    logging.error(f"Ошибка отправки уведомления: {e}")
-        except Exception as e:
-            logging.error(f"Ошибка обработки времени: {e}")
-
-def run_bot():
+def main():
     app = Application.builder().token(BOT_TOKEN).build()
+    
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_cmd))
     app.add_handler(MessageHandler(filters.TEXT, handle))
+    
     app.job_queue.run_repeating(notifications, interval=30, first=10)
-    print("🤖 Бот запускается...")
+    
+    print("бот запускается...")
     app.run_polling()
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 10000))
-    
-    # Запускаем бота в отдельном потоке
-    bot_thread = threading.Thread(target=run_bot, daemon=True)
-    bot_thread.start()
-    
-    # Запускаем Flask в главном потоке
-    print(f"🌐 Сервер запускается на порту {port}")
-    app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
+    if os.environ.get('PORT'):
+        # Запускаем Flask в фоне
+        web_thread = threading.Thread(target=run_web, daemon=True)
+        web_thread.start()
+    main()
