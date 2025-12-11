@@ -1,11 +1,13 @@
 import os
 import json
 import logging
+import asyncio
 import urllib.request
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 
-from telegram import Update, ReplyKeyboardMarkup
+from flask import Flask
+from telegram import Update, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -13,21 +15,7 @@ from telegram.ext import (
     ContextTypes,
     filters,
 )
-from flask import Flask
-import threading
-web_app = Flask(__name__)
 
-@web_app.route('/')
-def home():
-    return 'Bot is running!'
-
-@web_app.route('/health')
-def health():
-    return {'status': 'ok'}, 200
-
-def run_web():
-    """Запуск Flask в отдельном потоке"""
-    web_app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 8080)))
 load_dotenv()
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
@@ -41,6 +29,12 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s — %(levelname)s — %(message)s"
 )
+
+app_web = Flask(__name__)
+
+@app_web.get("/")
+def home():
+    return "Bot is running!"
 
 def load_users():
     if not os.path.exists(USERS_FILE):
@@ -209,6 +203,7 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if text == "помощь":
         await help_cmd(update, context)
 
+
 async def notifications(context: ContextTypes.DEFAULT_TYPE):
     now = datetime.now().strftime("%H:%M")
     weekday = datetime.now().strftime("%A")
@@ -229,6 +224,7 @@ async def notifications(context: ContextTypes.DEFAULT_TYPE):
         if now == before10:
             await context.bot.send_message(chat_id=int(uid), text="через 10 минут первая пара!")
 
+
 def main():
     app = Application.builder().token(BOT_TOKEN).build()
     
@@ -242,8 +238,5 @@ def main():
     app.run_polling()
 
 if __name__ == "__main__":
-    if os.environ.get('PORT'):
-        # Запускаем Flask в фоне
-        web_thread = threading.Thread(target=run_web, daemon=True)
-        web_thread.start()
+
     main()
