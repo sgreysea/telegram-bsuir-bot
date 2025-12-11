@@ -106,87 +106,82 @@ DAY_RU = {
 }
 WEEK_ORDER = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
 
-def format_schedule_day(schedules, eng_day):
-    """Расписание на конкретный день с фильтрацией по неделям"""
+def format_schedule_day(schedules, day):
+    """Расписание на день с фильтрацией по неделе"""
     current_week = get_current_week()
-    lessons = schedules.get(eng_day, [])
+    lessons = schedules.get(day, [])
     
     if not lessons:
-        return f"{DAY_RU.get(eng_day, eng_day)}: занятий нет"
+        return f"{day}: занятий нет"
     
-    # Фильтруем занятия по текущей неделе
+    # ФИЛЬТРУЕМ по текущей неделе
     filtered_lessons = []
     for lesson in lessons:
         weeks = lesson.get("weekNumber")
         
-        # Если нет информации о неделях - показываем занятие
         if weeks is None:
             filtered_lessons.append(lesson)
             continue
-            
-        # Если неделя указана как список (для четных/нечетных)
-        if isinstance(weeks, list):
-            # Преобразуем все элементы списка в int
-            week_numbers = []
-            for w in weeks:
-                try:
-                    week_numbers.append(int(w))
-                except:
-                    continue
-            
-            if current_week in week_numbers:
-                filtered_lessons.append(lesson)
         
-        # Если неделя указана как число
+        if isinstance(weeks, list):
+            if current_week in weeks:
+                filtered_lessons.append(lesson)
         else:
             try:
-                # Пытаемся преобразовать в int
                 week_num = int(weeks)
                 if week_num == current_week:
                     filtered_lessons.append(lesson)
             except:
-                # Если не получается преобразовать, показываем занятие
                 filtered_lessons.append(lesson)
     
     if not filtered_lessons:
-        return f"{DAY_RU.get(eng_day, eng_day)}: нет занятий на этой неделе"
+        return f"{day}: нет занятий на этой неделе"
     
-    text = f"Расписание на {DAY_RU.get(eng_day, eng_day)}"
+    text = f"расписание на {day}"
     if current_week:
         text += f" (неделя {current_week})"
     text += ":\n\n"
     
-    # Сортируем занятия по времени начала
-    filtered_lessons.sort(key=lambda x: x.get('startLessonTime', '00:00'))
-    
     for lesson in filtered_lessons:
-        subject = lesson.get('subject', 'Не указано')
-        start_time = lesson.get('startLessonTime', '??:??')
-        end_time = lesson.get('endLessonTime', '??:??')
-        auditories = ', '.join(lesson.get('auditories', [])) or 'не указана'
-        
-        text += f"{start_time} - {end_time} | {subject} | {auditories}\n"
+        text += (
+            f"{lesson['startLessonTime']} - {lesson['endLessonTime']} | "
+            f"{lesson['subject']} | "
+            f"{', '.join(lesson.get('auditories', []))}\n"
+        )
     
     return text
 
 def format_schedule_week(schedules):
-    """Расписание на неделю с фильтрацией по текущей неделе"""
+    """Расписание на неделю ТОЛЬКО на текущую неделю"""
     current_week = get_current_week()
-    if current_week is None:
-        return "Не удалось определить текущую неделю"
     
-    text = f"📅 Расписание на неделю (неделя {current_week}):\n\n"
+    text = "расписание на неделю"
+    if current_week:
+        text += f" (неделя {current_week})"
+    text += ":\n\n"
     
-    # Идем по дням в правильном порядке
-    for eng_day in WEEK_ORDER:
-        ru_day = DAY_RU.get(eng_day, eng_day)
-        lessons = schedules.get(eng_day, [])
+    # Правильный порядок дней
+    days_order = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
+    
+    for day in days_order:
+        ru_day = {
+            "monday": "Понедельник",
+            "tuesday": "Вторник", 
+            "wednesday": "Среда",
+            "thursday": "Четверг",
+            "friday": "Пятница",
+            "saturday": "Суббота",
+            "sunday": "Воскресенье"
+        }.get(day, day)
+        
+        lessons = schedules.get(day, [])
+        text += f"{ru_day}:\n"
         
         if not lessons:
-            text += f"📌 {ru_day}: нет занятий\n\n"
+            text += "  нет занятий\n\n"
             continue
         
-        # Фильтруем занятия по текущей неделе
+        # ФИЛЬТРУЕМ по текущей неделе
         filtered_lessons = []
         for lesson in lessons:
             weeks = lesson.get("weekNumber")
@@ -195,47 +190,33 @@ def format_schedule_week(schedules):
             if weeks is None:
                 filtered_lessons.append(lesson)
                 continue
-                
-            # Если неделя указана как список
-            if isinstance(weeks, list):
-                # Преобразуем все в int
-                week_numbers = []
-                for w in weeks:
-                    try:
-                        week_numbers.append(int(w))
-                    except:
-                        continue
-                
-                if current_week in week_numbers:
-                    filtered_lessons.append(lesson)
             
-            # Если неделя указана как число
+            # Если неделя как список [1, 3, 5]
+            if isinstance(weeks, list):
+                if current_week in weeks:
+                    filtered_lessons.append(lesson)
+            # Если неделя как число 1
             else:
+                # Пробуем преобразовать в число
                 try:
                     week_num = int(weeks)
                     if week_num == current_week:
                         filtered_lessons.append(lesson)
                 except:
-                    # Если не получается преобразовать, показываем
+                    # Если не получается - показываем
                     filtered_lessons.append(lesson)
         
         if not filtered_lessons:
-            text += f"📌 {ru_day}: нет занятий на этой неделе\n\n"
+            text += "  нет занятий на этой неделе\n\n"
             continue
         
-        # Сортируем занятия по времени
-        filtered_lessons.sort(key=lambda x: x.get('startLessonTime', '00:00'))
-        
-        text += f"📌 {ru_day}:\n"
         for lesson in filtered_lessons:
-            subject = lesson.get('subject', 'Не указано')
-            start_time = lesson.get('startLessonTime', '??:??')
-            end_time = lesson.get('endLessonTime', '??:??')
-            auditories = ', '.join(lesson.get('auditories', [])) or 'не указана'
-            
-            text += f"  🕒 {start_time} - {end_time}\n"
-            text += f"  📚 {subject}\n"
-            text += f"  📍 {auditories}\n\n"
+            text += (
+                f"  {lesson['startLessonTime']} - {lesson['endLessonTime']} | "
+                f"{lesson['subject']} | "
+                f"{', '.join(lesson.get('auditories', []))}\n"
+            )
+        text += "\n"
     
     return text
 
