@@ -225,18 +225,35 @@ async def notifications(context: ContextTypes.DEFAULT_TYPE):
             await context.bot.send_message(chat_id=int(uid), text="через 10 минут первая пара!")
 
 
-def main():
-    app = Application.builder().token(BOT_TOKEN).build()
-    
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("help", help_cmd))
-    app.add_handler(MessageHandler(filters.TEXT, handle))
-    
-    app.job_queue.run_repeating(notifications, interval=30, first=10)
-    
-    print("бот запускается...")
-    app.run_polling()
 
 if __name__ == "__main__":
-
-    main()
+    import threading
+    
+    # Получаем порт от Render
+    port = int(os.environ.get("PORT", 10000))
+    
+    def run_flask():
+        """Запускаем Flask сервер"""
+        app_web.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
+    
+    def run_bot():
+        """Запускаем Telegram бота"""
+        app = Application.builder().token(BOT_TOKEN).build()
+        
+        app.add_handler(CommandHandler("start", start))
+        app.add_handler(CommandHandler("help", help_cmd))
+        app.add_handler(MessageHandler(filters.TEXT, handle))
+        
+        app.job_queue.run_repeating(notifications, interval=30, first=10)
+        
+        print("🤖 Бот запускается...")
+        app.run_polling(drop_pending_updates=True)
+    
+    # Запускаем Flask в главном потоке (это важно для Render!)
+    # Запускаем бота в отдельном потоке
+    
+    bot_thread = threading.Thread(target=run_bot, daemon=True)
+    bot_thread.start()
+    
+    print(f"🌐 Flask сервер запускается на порту {port}")
+    run_flask()  # Запускаем Flask в главном потоке
