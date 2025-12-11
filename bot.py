@@ -1,12 +1,13 @@
 import os
 import json
 import logging
-import asyncio
+import threading
 import urllib.request
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 
-from telegram import Update, ReplyKeyboardMarkup, KeyboardButton
+from flask import Flask
+from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -29,6 +30,16 @@ logging.basicConfig(
     format="%(asctime)s — %(levelname)s — %(message)s"
 )
 
+# ============= FLASK ДЛЯ RENDER =================
+
+app_web = Flask(__name__)
+
+@app_web.get("/")
+def home():
+    return "Bot is running!"
+
+# ================================================
+
 
 def load_users():
     if not os.path.exists(USERS_FILE):
@@ -36,11 +47,14 @@ def load_users():
     with open(USERS_FILE, "r", encoding="utf-8") as f:
         return json.load(f)
 
+
 def save_users(data):
     with open(USERS_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=4, ensure_ascii=False)
 
+
 users = load_users()
+
 
 def get_menu():
     return ReplyKeyboardMarkup([
@@ -52,6 +66,7 @@ def get_menu():
         ["помощь"]
     ], resize_keyboard=True)
 
+
 def _http_get_json(url):
     try:
         req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
@@ -60,6 +75,7 @@ def _http_get_json(url):
     except Exception as e:
         logging.error("HTTP Error: %s", e)
         return None
+
 
 def get_current_week():
     try:
@@ -70,6 +86,7 @@ def get_current_week():
     except:
         return None
 
+
 def get_schedule(group):
     url = f"https://iis.bsuir.by/api/v1/schedule?studentGroup={group}"
     data = _http_get_json(url)
@@ -79,28 +96,59 @@ def get_schedule(group):
 
     return data["schedules"]
 
-def format_schedule_day(schedules, day):
+
+# === исправление твоей ошибки: дни берём по-английски ===
+
+DAY_EN = {
+    "monday": "Monday",
+    "tuesday": "Tuesday",
+    "wednesday": "Wednesday",
+    "thursday": "Thursday",
+    "friday": "Friday",
+    "saturday": "Saturday",
+    "sunday": "Sunday",
+}
+
+DAY_RU = {
+    "Monday": "Понедельник",
+    "Tuesday": "Вторник",
+    "Wednesday": "Среда",
+    "Thursday": "Четверг",
+    "Friday": "Пятница",
+    "Saturday": "Суббота",
+    "Sunday": "Воскресенье",
+}
+
+
+def format_schedule_day(schedules, eng_day):
     week = get_current_week()
-    lessons = schedules.get(day, [])
+
+    lessons = schedules.get(eng_day, [])
     if not lessons:
-        return f"{day}: занятий нет"
-    text = f"расписание на {day}:\n\n"
+        return f"{DAY_RU.get(eng_day, eng_day)}: занятий нет"
+
+    text = f"Расписание на {DAY_RU[eng_day]}:\n\n"
+
     for lesson in lessons:
         weeks = lesson.get("weekNumber")
-        # check by week
         if isinstance(weeks, list) and week not in weeks:
             continue
+
         text += (
             f"{lesson['startLessonTime']} - {lesson['endLessonTime']} | "
             f"{lesson['subject']} | "
             f"{', '.join(lesson.get('auditories', []))}\n"
         )
+
     return text
 
+
 def format_schedule_week(schedules):
-    text = "расписание на неделю:\n\n"
+    text = "Расписание на неделю:\n\n"
     for day, lessons in schedules.items():
-        text += f"{day}:\n"
+        ru_name = DAY_RU.get(day, day)
+        text += f"{ru_name}:\n"
+
         if not lessons:
             text += "  нет занятий\n\n"
             continue
@@ -114,10 +162,15 @@ def format_schedule_week(schedules):
         text += "\n"
     return text
 
+
+# ================= HANDLERS ======================
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "привет, чтобы работать с ботом надо установить группу", reply_markup=get_menu()
+        "привет, чтобы работать с ботом надо установить группу",
+        reply_markup=get_menu()
     )
+
 
 async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
@@ -127,6 +180,7 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "3. пользуйся меню\n\n",
         reply_markup=get_menu()
     )
+
 
 async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.lower()
@@ -161,23 +215,13 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("ошибка загрузки расписания")
         return
 
-    ru = {
-        "monday": "Понедельник",
-        "tuesday": "Вторник",
-        "wednesday": "Среда",
-        "thursday": "Четверг",
-        "friday": "Пятница",
-        "saturday": "Суббота",
-        "sunday": "Воскресенье",
-    }
-
     if text == "расписание на сегодня":
-        d = ru[datetime.now().strftime("%A").lower()]
+        d = datetime.now().strftime("%A")
         await update.message.reply_text(format_schedule_day(sched, d))
         return
 
     if text == "расписание на завтра":
-        d = ru[(datetime.now() + timedelta(days=1)).strftime("%A").lower()]
+        d = (datetime.now() + timedelta(days=1)).strftime("%A")
         await update.message.reply_text(format_schedule_day(sched, d))
         return
 
@@ -219,18 +263,25 @@ async def notifications(context: ContextTypes.DEFAULT_TYPE):
             await context.bot.send_message(chat_id=int(uid), text="через 10 минут первая пара!")
 
 
-def main():
-    app = Application.builder().token(BOT_TOKEN).build()
-    
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("help", help_cmd))
-    app.add_handler(MessageHandler(filters.TEXT, handle))
-    
-    app.job_queue.run_repeating(notifications, interval=30, first=10)
-    
-    print("бот запускается...")
-    app.run_polling()
+# ================== BOT RUNNER ======================
+
+def run_bot():
+    application = Application.builder().token(BOT_TOKEN).build()
+
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("help", help_cmd))
+    application.add_handler(MessageHandler(filters.TEXT, handle))
+
+    application.job_queue.run_repeating(notifications, interval=30, first=10)
+
+    print("Bot is running...")
+    application.run_polling()
+
+
+# ================== MAIN ===========================
 
 if __name__ == "__main__":
+    threading.Thread(target=run_bot).start()
 
-    main()
+    port = int(os.environ.get("PORT", 5000))
+    app_web.run(host="0.0.0.0", port=port)
