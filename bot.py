@@ -98,54 +98,46 @@ def format_schedule_day(schedules, day):
     return text
 
 def format_schedule_week(schedules):
-    # Определяем правильный порядок дней недели (как они приходят из API)
-    week_order = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
-    
-    # Перевод на русский для красивого вывода
-    en_to_ru = {
-        "Monday": "Понедельник",
-        "Tuesday": "Вторник", 
-        "Wednesday": "Среда",
-        "Thursday": "Четверг",
-        "Friday": "Пятница",
-        "Saturday": "Суббота",
-        "Sunday": "Воскресенье"
+    current_week = get_current_week()
+    logging.info(f"Текущая неделя: {current_week}")
+
+    text = "Расписание на неделю"
+    if current_week:
+        text += f" (неделя {current_week})"
+    text += ":\n\n"
+
+    # Порядок дней
+    days_order = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
+
+    ru_days = {
+        "monday": "Понедельник",
+        "tuesday": "Вторник",
+        "wednesday": "Среда",
+        "thursday": "Четверг",
+        "friday": "Пятница",
+        "saturday": "Суббота",
+        "sunday": "Воскресенье",
     }
-    
-    week = get_current_week()
-    text = "расписание на неделю:\n\n"
-    
-    # Итерируем по дням в правильном порядке
-    for day_en in week_order:
-        day_ru = en_to_ru[day_en]
-        lessons = schedules.get(day_en, [])
-        
-        text += f"{day_ru}:\n"
-        
+
+    for day_key in days_order:
+        text += f"{ru_days[day_key]}:\n"
+
+        lessons = schedules.get(day_key, [])
         if not lessons:
             text += "  нет занятий\n\n"
             continue
 
-        # Фильтруем занятия по текущей неделе
-        filtered_lessons = []
         for lesson in lessons:
-            weeks = lesson.get("weekNumber")
-            if isinstance(weeks, list) and week not in weeks:
-                continue
-            filtered_lessons.append(lesson)
-        
-        if not filtered_lessons:
-            text += "  нет занятий\n\n"
-            continue
-
-        for lesson in filtered_lessons:
+            weeks = lesson.get("weekNumber", "не указано")
             text += (
                 f"  {lesson['startLessonTime']} - {lesson['endLessonTime']} | "
                 f"{lesson['subject']} | "
-                f"{', '.join(lesson.get('auditories', []))}\n"
+                f"{', '.join(lesson.get('auditories', []))} | "
+                f"недели: {weeks}\n"
             )
+
         text += "\n"
-    
+
     return text
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
