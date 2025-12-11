@@ -1,12 +1,13 @@
 import os
 import json
 import logging
+import asyncio
 import urllib.request
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 
 from flask import Flask
-from telegram import Update, ReplyKeyboardMarkup
+from telegram import Update, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -14,8 +15,6 @@ from telegram.ext import (
     ContextTypes,
     filters,
 )
-import threading
-import asyncio
 
 load_dotenv()
 
@@ -31,19 +30,11 @@ logging.basicConfig(
     format="%(asctime)s — %(levelname)s — %(message)s"
 )
 
-app = Flask(__name__)
+app_web = Flask(__name__)
 
-@app.route("/")
+@app_web.get("/")
 def home():
-    return "🤖 Telegram Bot is running 24/7", 200
-
-@app.route("/health")
-def health():
-    return "OK", 200
-
-@app.route("/ping")
-def ping():
-    return "pong", 200
+    return "Bot is running!"
 
 def load_users():
     if not os.path.exists(USERS_FILE):
@@ -61,6 +52,7 @@ def get_menu():
     return ReplyKeyboardMarkup([
         ["расписание на сегодня"],
         ["расписание на завтра"],
+        ["рассписание на неделю"],
         ["уведомления"],
         ["установить группу"],
         ["помощь"]
@@ -111,19 +103,34 @@ def format_schedule_day(schedules, day):
         )
     return text
 
+def format_schedule_week(schedules):
+    text = "расписание на неделю:\n\n"
+    for day, lessons in schedules.items():
+        text += f"{day}:\n"
+        if not lessons:
+            text += "  нет занятий\n\n"
+            continue
 
-
-# ============= ОБРАБОТЧИКИ ТЕЛЕГРАМ =============
+        for lesson in lessons:
+            text += (
+                f"  {lesson['startLessonTime']} - {lesson['endLessonTime']} | "
+                f"{lesson['subject']} | "
+                f"{', '.join(lesson.get('auditories', []))}\n"
+            )
+        text += "\n"
+    return text
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "привет, чтобы работать с ботом надо установить группу",
-        reply_markup=get_menu()
+        "привет, чтобы работать с ботом надо установить группу", reply_markup=get_menu()
     )
 
 async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "ИНСТРУКЦИЯ:\n1. нажми «установить группу»\n2. введи номер\n3. пользуйся меню",
+        "ИНСТРУКЦИЯ:\n"
+        "1. нажми «установить группу»\n"
+        "2. введи номер\n"
+        "3. пользуйся меню\n\n",
         reply_markup=get_menu()
     )
 
@@ -145,12 +152,9 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         users[uid] = {"group": group, "notify": False}
         save_users(users)
-        context.user_data["await_group"] = False
 
-        await update.message.reply_text(
-            f"Группа {group} сохранена!",
-            reply_markup=get_menu()
-        )
+        context.user_data["await_group"] = False
+        await update.message.reply_text(f"Группа {group} сохранена!", reply_markup=get_menu())
         return
 
     if uid not in users:
@@ -163,15 +167,14 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("ошибка загрузки расписания")
         return
 
-    # ВАЖНО: создаем словарь для перевода
     ru = {
         "monday": "Понедельник",
-        "tuesday": "Вторник", 
+        "tuesday": "Вторник",
         "wednesday": "Среда",
         "thursday": "Четверг",
         "friday": "Пятница",
         "saturday": "Суббота",
-        "sunday": "Воскресенье"
+        "sunday": "Воскресенье",
     }
 
     if text == "расписание на сегодня":
@@ -182,6 +185,10 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if text == "расписание на завтра":
         d = ru[(datetime.now() + timedelta(days=1)).strftime("%A").lower()]
         await update.message.reply_text(format_schedule_day(sched, d))
+        return
+
+    if text == "рассписание на неделю":
+        await update.message.reply_text(format_schedule_week(sched))
         return
 
     if text == "уведомления":
@@ -195,102 +202,41 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if text == "помощь":
         await help_cmd(update, context)
-        return
-        
-    # Если текст не распознан
-    await update.message.reply_text(
-        "Используйте меню для навигации",
-        reply_markup=get_menu()
-    )
+
 
 async def notifications(context: ContextTypes.DEFAULT_TYPE):
-    now = datetime.now()
-    current_time = now.strftime("%H:%M")
-    current_weekday = now.strftime("%A").lower()
+    now = datetime.now().strftime("%H:%M")
+    weekday = datetime.now().strftime("%A")
 
     for uid, data in users.items():
-        if not data.get("notify", False):
+        if not data["notify"]:
             continue
 
-        user_group = data.get("group")
-        if not user_group:
+        sched = get_schedule(data["group"])
+        lessons = sched.get(weekday, [])
+
+        if not lessons:
             continue
 
-        schedules = get_schedule(user_group)
-        if not schedules:
-            continue
+        first = lessons[0]["startLessonTime"]
+        before10 = (datetime.strptime(first, "%H:%M") - timedelta(minutes=10)).strftime("%H:%M")
 
-        today_lessons = schedules.get(current_weekday, [])
-        if not today_lessons:
-            continue
+        if now == before10:
+            await context.bot.send_message(chat_id=int(uid), text="через 10 минут первая пара!")
 
-        first_lesson = today_lessons[0]
-        first_lesson_start_str = first_lesson.get("startLessonTime")
 
-        if not first_lesson_start_str:
-            continue
-
-        try:
-            first_lesson_start = datetime.strptime(first_lesson_start_str, "%H:%M").replace(
-                year=now.year, month=now.month, day=now.day
-            )
-            notification_time = first_lesson_start - timedelta(minutes=10)
-            time_diff = abs((now - notification_time).total_seconds())
-
-            if time_diff <= 30:
-                try:
-                    await context.bot.send_message(
-                        chat_id=int(uid),
-                        text=f"🧑‍🏫 Через 10 минут первая пара!\n📚 {first_lesson.get('subject', 'Предмет')}\n📍 Ауд: {', '.join(first_lesson.get('auditories', ['не указана']))}"
-                    )
-                except Exception as e:
-                    logging.error(f"Ошибка отправки уведомления: {e}")
-        except Exception as e:
-            logging.error(f"Ошибка обработки времени: {e}")
-
-# ============= ЗАПУСК ВСЕГО =============
-
-def run_flask_server():
-    """Запуск Flask сервера для Render health check"""
-    port = int(os.environ.get("PORT", 10000))
-    logging.info(f"🌐 Flask сервер запущен на порту {port}")
-    # Важно: use_reloader=False для избежания двойного запуска
-    app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
-
-def run_telegram_bot():
-    """Запуск Telegram бота в отдельном потоке"""
-    try:
-        # Создаем новое asyncio событие для этого потока
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        
-        # Создаем и настраиваем приложение
-        application = Application.builder().token(BOT_TOKEN).build()
-        
-        application.add_handler(CommandHandler("start", start))
-        application.add_handler(CommandHandler("help", help_cmd))
-        application.add_handler(MessageHandler(filters.TEXT, handle))
-        
-        application.job_queue.run_repeating(notifications, interval=30, first=10)
-        
-        logging.info("🤖 Telegram Bot запускается...")
-        
-        # Запускаем бота в этом event loop
-        loop.run_until_complete(application.initialize())
-        loop.run_until_complete(application.start())
-        logging.info("✅ Telegram Bot запущен и работает")
-        
-        # Запускаем polling
-        loop.run_until_complete(application.updater.start_polling())
-        
-        # Держим loop активным
-        loop.run_forever()
-        
-    except Exception as e:
-        logging.error(f"❌ Ошибка запуска Telegram бота: {e}")
+def main():
+    app = Application.builder().token(BOT_TOKEN).build()
+    
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("help", help_cmd))
+    app.add_handler(MessageHandler(filters.TEXT, handle))
+    
+    app.job_queue.run_repeating(notifications, interval=30, first=10)
+    
+    print("бот запускается...")
+    app.run_polling()
 
 if __name__ == "__main__":
-    bot_thread = threading.Thread(target=run_telegram_bot, daemon=True)
-    bot_thread.start()
-    
-    run_flask_server()
+
+    main()
