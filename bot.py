@@ -99,45 +99,51 @@ def format_schedule_day(schedules, day):
 
 def format_schedule_week(schedules):
     current_week = get_current_week()
-    logging.info(f"Текущая неделя: {current_week}")
-
-    text = "Расписание на неделю"
+    
+    # ОТЛАДОЧНЫЙ ВЫВОД
+    logging.info(f"Текущая неделя для расписания на неделю: {current_week}")
+    
+    text = "расписание на неделю"
     if current_week:
         text += f" (неделя {current_week})"
     text += ":\n\n"
-
-    # Порядок дней
-    days_order = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
-
+    
+    # Словарь для перевода
     ru_days = {
         "monday": "Понедельник",
-        "tuesday": "Вторник",
+        "tuesday": "Вторник", 
         "wednesday": "Среда",
         "thursday": "Четверг",
         "friday": "Пятница",
         "saturday": "Суббота",
-        "sunday": "Воскресенье",
+        "sunday": "Воскресенье"
     }
-
+    
+    days_order = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
+    
     for day_key in days_order:
-        text += f"{ru_days[day_key]}:\n"
-
+        ru_day = ru_days.get(day_key, day_key)
         lessons = schedules.get(day_key, [])
+        
+        text += f"{ru_day}:\n"
+        
         if not lessons:
             text += "  нет занятий\n\n"
             continue
-
+        
+        # ВРЕМЕННО: НЕ ФИЛЬТРУЕМ ВООБЩЕ!
+        # Просто показываем все занятия
         for lesson in lessons:
-            weeks = lesson.get("weekNumber", "не указано")
+            # Всегда показываем информацию о неделе
+            weeks = lesson.get('weekNumber', 'не указано')
             text += (
                 f"  {lesson['startLessonTime']} - {lesson['endLessonTime']} | "
                 f"{lesson['subject']} | "
                 f"{', '.join(lesson.get('auditories', []))} | "
                 f"недели: {weeks}\n"
             )
-
         text += "\n"
-
+    
     return text
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
