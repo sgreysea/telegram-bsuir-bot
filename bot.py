@@ -1,13 +1,13 @@
 import os
 import json
 import logging
-import asyncio
+import threading
 import urllib.request
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 
 from flask import Flask
-from telegram import Update, ReplyKeyboardMarkup, KeyboardButton
+from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -30,11 +30,16 @@ logging.basicConfig(
     format="%(asctime)s — %(levelname)s — %(message)s"
 )
 
-app_web = Flask(__name__)
+# Flask приложение для Render
+web_app = Flask(__name__)
 
-@app_web.get("/")
+@web_app.route('/')
 def home():
     return "Bot is running!"
+
+@web_app.route('/health')
+def health():
+    return {"status": "ok"}, 200
 
 def load_users():
     if not os.path.exists(USERS_FILE):
@@ -203,7 +208,6 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if text == "помощь":
         await help_cmd(update, context)
 
-
 async def notifications(context: ContextTypes.DEFAULT_TYPE):
     now = datetime.now().strftime("%H:%M")
     weekday = datetime.now().strftime("%A")
@@ -224,8 +228,8 @@ async def notifications(context: ContextTypes.DEFAULT_TYPE):
         if now == before10:
             await context.bot.send_message(chat_id=int(uid), text="через 10 минут первая пара!")
 
-
-def main():
+def run_bot():
+    """Запуск Telegram бота"""
     app = Application.builder().token(BOT_TOKEN).build()
     
     app.add_handler(CommandHandler("start", start))
@@ -234,9 +238,25 @@ def main():
     
     app.job_queue.run_repeating(notifications, interval=30, first=10)
     
-    print("бот запускается...")
+    print("Бот запускается...")
     app.run_polling()
 
-if __name__ == "__main__":
+def run_web():
+    """Запуск Flask веб-сервера"""
+    port = int(os.environ.get("PORT", 8080))
+    web_app.run(host="0.0.0.0", port=port)
 
-    main()
+if __name__ == "__main__":
+    # Проверяем, есть ли переменная PORT (она будет на Render)
+    if os.environ.get("PORT"):
+        print("Запуск на Render: запускаем бота и Flask...")
+        # Запускаем бота в отдельном потоке
+        bot_thread = threading.Thread(target=run_bot, daemon=True)
+        bot_thread.start()
+        
+        # Запускаем Flask в основном потоке
+        run_web()
+    else:
+        print("Локальный запуск: запускаем только бота...")
+        # Локально запускаем только бота
+        run_bot()
