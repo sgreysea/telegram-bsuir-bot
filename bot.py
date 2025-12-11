@@ -12,7 +12,8 @@ from telegram.ext import (
     MessageHandler,
     ContextTypes,
     filters,
-)from flask import Flask
+)
+from flask import Flask
 import threading
 web_app = Flask(__name__)
 
