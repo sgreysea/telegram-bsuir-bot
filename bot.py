@@ -1,7 +1,6 @@
 import os
 import json
 import logging
-import asyncio
 import urllib.request
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
@@ -30,16 +29,17 @@ logging.basicConfig(
     format="%(asctime)s — %(levelname)s — %(message)s"
 )
 
-# ============= FLASK APP =============
-
+# ============= FLASK (только для порта) =============
 app = Flask(__name__)
 
-# ============= TELEGRAM APP (глобально) =============
+@app.route("/")
+def home():
+    return "🤖 Telegram Bot is running (polling mode)"
 
-# Создаем Telegram Application глобально
-telegram_app = Application.builder().token(BOT_TOKEN).build()
-
-# ============= РАБОТА С ПОЛЬЗОВАТЕЛЯМИ =============
+@app.route("/health")
+def health():
+    return "OK", 200
+# ====================================================
 
 def load_users():
     if not os.path.exists(USERS_FILE):
@@ -52,8 +52,6 @@ def save_users(data):
         json.dump(data, f, indent=4, ensure_ascii=False)
 
 users = load_users()
-
-# ============= ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ =============
 
 def get_menu():
     return ReplyKeyboardMarkup([
@@ -135,7 +133,7 @@ def format_schedule_week(schedules):
         text += "\n"
     return text
 
-# ================= ОБРАБОТЧИКИ ТЕЛЕГРАМ ======================
+# ================= HANDLERS ======================
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
@@ -212,6 +210,7 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await help_cmd(update, context)
 
 async def notifications(context: ContextTypes.DEFAULT_TYPE):
+    """Улучшенные уведомления с интервальной проверкой"""
     now = datetime.now()
     current_time = now.strftime("%H:%M")
     current_weekday = now.strftime("%A")
@@ -239,12 +238,16 @@ async def notifications(context: ContextTypes.DEFAULT_TYPE):
             continue
 
         try:
+            # Преобразуем время начала пары
             first_lesson_start = datetime.strptime(first_lesson_start_str, "%H:%M").replace(
                 year=now.year, month=now.month, day=now.day
             )
+            # Время за 10 минут до пары
             notification_time = first_lesson_start - timedelta(minutes=10)
+            
+            # Проверяем интервал ±30 секунд
             time_diff = abs((now - notification_time).total_seconds())
-
+            
             if time_diff <= 30:
                 try:
                     await context.bot.send_message(
@@ -252,94 +255,37 @@ async def notifications(context: ContextTypes.DEFAULT_TYPE):
                         text=f"🧑‍🏫 Через 10 минут первая пара!\n📚 {first_lesson.get('subject', 'Предмет')}\n📍 Ауд: {', '.join(first_lesson.get('auditories', ['не указана']))}"
                     )
                 except Exception as e:
-                    logging.error(f"Ошибка отправки уведомления пользователю {uid}: {e}")
+                    logging.error(f"Ошибка отправки уведомления: {e}")
         except Exception as e:
-            logging.error(f"Ошибка обработки времени для пользователя {uid}: {e}")
+            logging.error(f"Ошибка обработки времени: {e}")
 
-# ================== WEBHOOK РОУТЫ ========================
+# ================== ЗАПУСК ========================
 
-@app.post("/webhook")
-def webhook():
-    """Упрощенный обработчик webhook"""
-    import threading
-    
-    # Получаем данные
-    data = request.get_json()
-    if not data:
-        return "no data", 400
-    
-    # Создаем Update
-    update = Update.de_json(data, telegram_app.bot)
-    
-    # Запускаем обработку в отдельном потоке
-    def process_update_async(update):
-        asyncio.run(telegram_app.process_update(update))
-    
-    thread = threading.Thread(target=process_update_async, args=(update,))
-    thread.daemon = True
-    thread.start()
-    
-    return "ok", 200
-
-@app.get("/")
-def home():
-    return "🤖 Telegram Bot is running!<br><br>" \
-           "<a href='/set_webhook'>/set_webhook</a> - настроить вебхук<br>" \
-           "<a href='/delete_webhook'>/delete_webhook</a> - удалить вебхук"
-
-@app.get("/set_webhook")
-async def set_webhook_route():
-    """Настроить вебхук (вызовите один раз после деплоя)"""
-    webhook_url = f"https://{request.host}/webhook"
-    try:
-        success = await telegram_app.bot.set_webhook(webhook_url)
-        return {
-            "status": "success" if success else "failed",
-            "webhook_url": webhook_url,
-            "message": "Webhook установлен" if success else "Не удалось установить webhook"
-        }
-    except Exception as e:
-        return {"status": "error", "message": str(e)}, 500
-
-@app.get("/delete_webhook")
-async def delete_webhook_route():
-    """Удалить вебхук"""
-    try:
-        success = await telegram_app.bot.delete_webhook()
-        return {
-            "status": "success" if success else "failed",
-            "message": "Webhook удален" if success else "Не удалось удалить webhook"
-        }
-    except Exception as e:
-        return {"status": "error", "message": str(e)}, 500
-
-# ================== ЗАПУСК ПРИЛОЖЕНИЯ ========================
-
-async def setup_telegram_app():
-    """Настройка Telegram приложения"""
-    # Регистрируем обработчики
-    telegram_app.add_handler(CommandHandler("start", start))
-    telegram_app.add_handler(CommandHandler("help", help_cmd))
-    telegram_app.add_handler(MessageHandler(filters.TEXT, handle))
-    
-    # Запускаем задачу уведомлений
-    telegram_app.job_queue.run_repeating(notifications, interval=30, first=10)
-    
-    # Инициализируем приложение
-    await telegram_app.initialize()
-    await telegram_app.start()
-    
-    logging.info("✅ Telegram Application инициализирован")
-
-def run_app():
-    """Запуск Flask приложения"""
+def run_flask():
+    """Запуск Flask в отдельном потоке"""
     port = int(os.environ.get("PORT", 10000))
-    logging.info(f"🚀 Запуск Flask сервера на порту {port}")
-    app.run(host="0.0.0.0", port=port, debug=False)
+    logging.info(f"🚀 Flask запускается на порту {port}")
+    app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
+
+def run_telegram_bot():
+    """Запуск Telegram бота в основном потоке"""
+    application = Application.builder().token(BOT_TOKEN).build()
+    
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("help", help_cmd))
+    application.add_handler(MessageHandler(filters.TEXT, handle))
+    
+    application.job_queue.run_repeating(notifications, interval=30, first=10)
+    
+    logging.info("🤖 Telegram Bot запускается...")
+    application.run_polling()
 
 if __name__ == "__main__":
-    # Запускаем настройку Telegram приложения
-    asyncio.run(setup_telegram_app())
+    import threading
     
-    # Запускаем Flask сервер
-    run_app()
+    # Запускаем Flask в отдельном потоке
+    flask_thread = threading.Thread(target=run_flask, daemon=True)
+    flask_thread.start()
+    
+    # Запускаем Telegram бота в основном потоке
+    run_telegram_bot()
