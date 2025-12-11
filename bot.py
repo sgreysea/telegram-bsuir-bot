@@ -5,7 +5,7 @@ import urllib.request
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 
-from flask import Flask, request
+from flask import Flask
 from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import (
     Application,
@@ -14,6 +14,8 @@ from telegram.ext import (
     ContextTypes,
     filters,
 )
+import threading
+import asyncio
 
 load_dotenv()
 
@@ -29,17 +31,22 @@ logging.basicConfig(
     format="%(asctime)s — %(levelname)s — %(message)s"
 )
 
-# ============= FLASK (только для порта) =============
+# ============= FLASK СЕРВЕР (ДЛЯ PORT HEALTH CHECK) =============
 app = Flask(__name__)
 
 @app.route("/")
 def home():
-    return "🤖 Telegram Bot is running (polling mode)"
+    return "🤖 Telegram Bot is running 24/7", 200
 
 @app.route("/health")
 def health():
     return "OK", 200
-# ====================================================
+
+@app.route("/ping")
+def ping():
+    return "pong", 200
+
+# ============= ФУНКЦИИ БОТА =============
 
 def load_users():
     if not os.path.exists(USERS_FILE):
@@ -133,7 +140,7 @@ def format_schedule_week(schedules):
         text += "\n"
     return text
 
-# ================= HANDLERS ======================
+# ============= ОБРАБОТЧИКИ ТЕЛЕГРАМ =============
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
@@ -210,7 +217,6 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await help_cmd(update, context)
 
 async def notifications(context: ContextTypes.DEFAULT_TYPE):
-    """Улучшенные уведомления с интервальной проверкой"""
     now = datetime.now()
     current_time = now.strftime("%H:%M")
     current_weekday = now.strftime("%A")
@@ -238,16 +244,12 @@ async def notifications(context: ContextTypes.DEFAULT_TYPE):
             continue
 
         try:
-            # Преобразуем время начала пары
             first_lesson_start = datetime.strptime(first_lesson_start_str, "%H:%M").replace(
                 year=now.year, month=now.month, day=now.day
             )
-            # Время за 10 минут до пары
             notification_time = first_lesson_start - timedelta(minutes=10)
-            
-            # Проверяем интервал ±30 секунд
             time_diff = abs((now - notification_time).total_seconds())
-            
+
             if time_diff <= 30:
                 try:
                     await context.bot.send_message(
@@ -259,33 +261,54 @@ async def notifications(context: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             logging.error(f"Ошибка обработки времени: {e}")
 
-# ================== ЗАПУСК ========================
+# ============= ЗАПУСК ВСЕГО =============
 
-def run_flask():
-    """Запуск Flask в отдельном потоке"""
+def run_flask_server():
+    """Запуск Flask сервера для Render health check"""
     port = int(os.environ.get("PORT", 10000))
-    logging.info(f"🚀 Flask запускается на порту {port}")
+    logging.info(f"🌐 Flask сервер запущен на порту {port}")
+    # Важно: use_reloader=False для избежания двойного запуска
     app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
 
 def run_telegram_bot():
-    """Запуск Telegram бота в основном потоке"""
-    application = Application.builder().token(BOT_TOKEN).build()
-    
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("help", help_cmd))
-    application.add_handler(MessageHandler(filters.TEXT, handle))
-    
-    application.job_queue.run_repeating(notifications, interval=30, first=10)
-    
-    logging.info("🤖 Telegram Bot запускается...")
-    application.run_polling()
+    """Запуск Telegram бота в отдельном потоке"""
+    try:
+        # Создаем новое asyncio событие для этого потока
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
+        # Создаем и настраиваем приложение
+        application = Application.builder().token(BOT_TOKEN).build()
+        
+        application.add_handler(CommandHandler("start", start))
+        application.add_handler(CommandHandler("help", help_cmd))
+        application.add_handler(MessageHandler(filters.TEXT, handle))
+        
+        application.job_queue.run_repeating(notifications, interval=30, first=10)
+        
+        logging.info("🤖 Telegram Bot запускается...")
+        
+        # Запускаем бота в этом event loop
+        loop.run_until_complete(application.initialize())
+        loop.run_until_complete(application.start())
+        logging.info("✅ Telegram Bot запущен и работает")
+        
+        # Запускаем polling
+        loop.run_until_complete(application.updater.start_polling())
+        
+        # Держим loop активным
+        loop.run_forever()
+        
+    except Exception as e:
+        logging.error(f"❌ Ошибка запуска Telegram бота: {e}")
 
 if __name__ == "__main__":
-    import threading
+    # Запускаем Flask сервер в главном потоке (Render увидит порт)
+    # Telegram бот запускается в отдельном потоке
     
-    # Запускаем Flask в отдельном потоке
-    flask_thread = threading.Thread(target=run_flask, daemon=True)
-    flask_thread.start()
+    # Создаем поток для Telegram бота
+    bot_thread = threading.Thread(target=run_telegram_bot, daemon=True)
+    bot_thread.start()
     
-    # Запускаем Telegram бота в основном потоке
-    run_telegram_bot()
+    # Запускаем Flask в главном потоке (это важно для Render)
+    run_flask_server()
