@@ -96,13 +96,13 @@ def get_schedule(group):
     return data["schedules"]
 
 DAY_RU = {
-    "Monday": "Понедельник",
-    "Tuesday": "Вторник",
-    "Wednesday": "Среда",
-    "Thursday": "Четверг",
-    "Friday": "Пятница",
-    "Saturday": "Суббота",
-    "Sunday": "Воскресенье",
+    "monday": "Понедельник",
+    "tuesday": "Вторник", 
+    "wednesday": "Среда",
+    "thursday": "Четверг",
+    "friday": "Пятница",
+    "saturday": "Суббота",
+    "sunday": "Воскресенье"
 }
 WEEK_ORDER = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
 
@@ -273,36 +273,42 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if text == "расписание на сегодня":
         # Получаем английское название сегодняшнего дня
         today = datetime.now()
-        eng_day = today.strftime("%A")
+        eng_day = today.strftime("%A")  # "Monday"
+        # ПЕРЕВОДИМ В НИЖНИЙ РЕГИСТР!
+        eng_day_lower = eng_day.lower()  # "monday"
         ru_day = DAY_RU.get(eng_day, eng_day)
-        
-        # Проверяем, есть ли расписание на этот день
-        if eng_day not in sched:
+    
+    # Проверяем, есть ли расписание на этот день
+    # ИЩЕМ ПО СТРОЧНОМУ КЛЮЧУ!
+        if eng_day_lower not in sched:
             current_week = get_current_week()
             week_info = f" (неделя {current_week})" if current_week else ""
             await update.message.reply_text(f"{ru_day}{week_info}: занятий нет")
             return
-            
-        schedule_text = format_schedule_day(sched, eng_day)
-        await update.message.reply_text(schedule_text)
-        return
+        
+    # ПЕРЕДАЕМ СТРОЧНЫЙ КЛЮЧ
+    schedule_text = format_schedule_day(sched, eng_day_lower)
+    await update.message.reply_text(schedule_text)
+    return
 
     if text == "расписание на завтра":
-        # Получаем английское название завтрашнего дня
+    # Получаем английское название завтрашнего дня
         tomorrow = datetime.now() + timedelta(days=1)
         eng_day = tomorrow.strftime("%A")
+    # ПЕРЕВОДИМ В НИЖНИЙ РЕГИСТР!
+        eng_day_lower = eng_day.lower()
         ru_day = DAY_RU.get(eng_day, eng_day)
-        
-        # Проверяем, есть ли расписание на этот день
-        if eng_day not in sched:
+    
+    # Проверяем, есть ли расписание на этот день
+        if eng_day_lower not in sched:
             current_week = get_current_week()
             week_info = f" (неделя {current_week})" if current_week else ""
             await update.message.reply_text(f"{ru_day}{week_info}: занятий нет")
             return
-            
-        schedule_text = format_schedule_day(sched, eng_day)
-        await update.message.reply_text(schedule_text)
-        return
+        
+    schedule_text = format_schedule_day(sched, eng_day_lower)
+    await update.message.reply_text(schedule_text)
+    return
 
     if text == "рассписание на неделю":
         schedule_text = format_schedule_week(sched)
@@ -324,7 +330,7 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def notifications(context: ContextTypes.DEFAULT_TYPE):
     now = datetime.now()
     current_time = now.strftime("%H:%M")
-    current_weekday = now.strftime("%A")
+    current_weekday = now.strftime("%A").lower()
 
     for uid, data in users.items():
         if not data.get("notify", False):
