@@ -106,48 +106,72 @@ DAY_RU = {
 }
 WEEK_ORDER = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
 
-def format_schedule_day(schedules, day):
+def format_schedule_day(schedules, day_key, ru_day):
     """Расписание на день с фильтрацией по неделе"""
     current_week = get_current_week()
-    lessons = schedules.get(day, [])
+    lessons = schedules.get(day_key, [])  # Используем day_key (строчный)
     
     if not lessons:
-        return f"{day}: занятий нет"
+        return f"{ru_day}: занятий нет"
     
     # ФИЛЬТРУЕМ по текущей неделе
     filtered_lessons = []
     for lesson in lessons:
         weeks = lesson.get("weekNumber")
         
+        # Если нет информации о неделях - показываем занятие
         if weeks is None:
             filtered_lessons.append(lesson)
             continue
         
+        # Если неделя указана как список [1, 3, 5]
         if isinstance(weeks, list):
-            if current_week in weeks:
-                filtered_lessons.append(lesson)
+            # Преобразуем все элементы списка в int
+            week_numbers = []
+            for w in weeks:
+                try:
+                    week_numbers.append(int(w))
+                except:
+                    continue
+            
+            # Показываем ВСЕ занятия для отладки
+            filtered_lessons.append(lesson)
+            # Раскомментируйте когда заработает:
+            # if current_week in week_numbers:
+            #     filtered_lessons.append(lesson)
+        
+        # Если неделя указана как число
         else:
             try:
                 week_num = int(weeks)
-                if week_num == current_week:
-                    filtered_lessons.append(lesson)
+                # Показываем ВСЕ занятия для отладки
+                filtered_lessons.append(lesson)
+                # Раскомментируйте когда заработает:
+                # if week_num == current_week:
+                #     filtered_lessons.append(lesson)
             except:
                 filtered_lessons.append(lesson)
     
     if not filtered_lessons:
-        return f"{day}: нет занятий на этой неделе"
+        return f"{ru_day}: нет занятий на этой неделе"
     
-    text = f"расписание на {day}"
+    text = f"расписание на {ru_day}"
     if current_week:
         text += f" (неделя {current_week})"
     text += ":\n\n"
     
+    # Сортируем по времени
+    filtered_lessons.sort(key=lambda x: x.get('startLessonTime', '00:00'))
+    
     for lesson in filtered_lessons:
-        text += (
-            f"{lesson['startLessonTime']} - {lesson['endLessonTime']} | "
-            f"{lesson['subject']} | "
-            f"{', '.join(lesson.get('auditories', []))}\n"
-        )
+        subject = lesson.get('subject', 'Не указано')
+        start_time = lesson.get('startLessonTime', '??:??')
+        end_time = lesson.get('endLessonTime', '??:??')
+        auditories = ', '.join(lesson.get('auditories', [])) or 'не указана'
+        week_num = lesson.get('weekNumber', '?')
+        
+        # Для отладки показываем номер недели
+        text += f"{start_time} - {end_time} | {subject} | {auditories} [нед: {week_num}]\n"
     
     return text
 
@@ -270,45 +294,55 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("ошибка загрузки расписания")
         return
 
-    if text == "расписание на сегодня":
-        # Получаем английское название сегодняшнего дня
-        today = datetime.now()
-        eng_day = today.strftime("%A")  # "Monday"
-        # ПЕРЕВОДИМ В НИЖНИЙ РЕГИСТР!
-        eng_day_lower = eng_day.lower()  # "monday"
-        ru_day = DAY_RU.get(eng_day, eng_day)
-    
-    # Проверяем, есть ли расписание на этот день
-    # ИЩЕМ ПО СТРОЧНОМУ КЛЮЧУ!
-        if eng_day_lower not in sched:
+    # ВАЖНО: создаем словарь для перевода
+    ru = {
+        "monday": "Понедельник",
+        "tuesday": "Вторник", 
+        "wednesday": "Среда",
+        "thursday": "Четверг",
+        "friday": "Пятница",
+        "saturday": "Суббота",
+        "sunday": "Воскресенье"
+    }
+    print(f"\n=== ОТЛАДКА для группы {group} ===")
+    print(f"Ключи в расписании: {list(sched.keys())[:3]}...")
+    for day_key in ['monday', 'tuesday', 'wednesday']:
+        if day_key in sched:
+            lessons = sched[day_key]
+        if lessons:
+            print(f"{day_key}: {len(lessons)} занятий, первое: {lessons[0].get('subject', '?')}")
+        if text == "расписание на сегодня":
+        # Получаем день в нижнем регистре
+            day_key = datetime.now().strftime("%A").lower()  # "monday"
+            ru_day = ru.get(day_key, day_key)
+        
+        # Проверяем, есть ли расписание на этот день
+        if day_key not in sched:
             current_week = get_current_week()
             week_info = f" (неделя {current_week})" if current_week else ""
             await update.message.reply_text(f"{ru_day}{week_info}: занятий нет")
             return
-        
-    # ПЕРЕДАЕМ СТРОЧНЫЙ КЛЮЧ
-    schedule_text = format_schedule_day(sched, eng_day_lower)
-    await update.message.reply_text(schedule_text)
-    return
+            
+        schedule_text = format_schedule_day(sched, day_key, ru_day)
+        await update.message.reply_text(schedule_text)
+        return
 
     if text == "расписание на завтра":
-    # Получаем английское название завтрашнего дня
+        # Получаем завтрашний день в нижнем регистре
         tomorrow = datetime.now() + timedelta(days=1)
-        eng_day = tomorrow.strftime("%A")
-    # ПЕРЕВОДИМ В НИЖНИЙ РЕГИСТР!
-        eng_day_lower = eng_day.lower()
-        ru_day = DAY_RU.get(eng_day, eng_day)
-    
-    # Проверяем, есть ли расписание на этот день
-        if eng_day_lower not in sched:
+        day_key = tomorrow.strftime("%A").lower()  # "tuesday"
+        ru_day = ru.get(day_key, day_key)
+        
+        # Проверяем, есть ли расписание на этот день
+        if day_key not in sched:
             current_week = get_current_week()
             week_info = f" (неделя {current_week})" if current_week else ""
             await update.message.reply_text(f"{ru_day}{week_info}: занятий нет")
             return
-        
-    schedule_text = format_schedule_day(sched, eng_day_lower)
-    await update.message.reply_text(schedule_text)
-    return
+            
+        schedule_text = format_schedule_day(sched, day_key, ru_day)
+        await update.message.reply_text(schedule_text)
+        return
 
     if text == "рассписание на неделю":
         schedule_text = format_schedule_week(sched)
