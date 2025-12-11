@@ -46,7 +46,7 @@ def get_menu():
     return ReplyKeyboardMarkup([
         ["расписание на сегодня"],
         ["расписание на завтра"],
-        ["рассписание на неделю"],
+        ["расписание на неделю"],
         ["уведомления"],
         ["установить группу"],
         ["помощь"]
@@ -98,20 +98,53 @@ def format_schedule_day(schedules, day):
     return text
 
 def format_schedule_week(schedules):
-    text = "расписание на неделю:\n\n"
-    for day, lessons in schedules.items():
-        text += f"{day}:\n"
+    # Порядок дней недели по порядку
+    week_order = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+    
+    # Перевод на русский
+    en_to_ru = {
+        "Monday": "Понедельник",
+        "Tuesday": "Вторник",
+        "Wednesday": "Среда",
+        "Thursday": "Четверг",
+        "Friday": "Пятница",
+        "Saturday": "Суббота",
+        "Sunday": "Воскресенье"
+    }
+    
+    week = get_current_week()
+    text = "Расписание на неделю:\n\n"
+    
+    for day_en in week_order:
+        day_ru = en_to_ru[day_en]
+        lessons = schedules.get(day_en, [])
+        
+        text += f"{day_ru}:\n"
+        
         if not lessons:
             text += "  нет занятий\n\n"
             continue
 
+        # Фильтруем занятия по неделе
+        filtered_lessons = []
         for lesson in lessons:
+            weeks = lesson.get("weekNumber")
+            if isinstance(weeks, list) and week not in weeks:
+                continue
+            filtered_lessons.append(lesson)
+        
+        if not filtered_lessons:
+            text += "  нет занятий\n\n"
+            continue
+
+        for lesson in filtered_lessons:
             text += (
                 f"  {lesson['startLessonTime']} - {lesson['endLessonTime']} | "
                 f"{lesson['subject']} | "
                 f"{', '.join(lesson.get('auditories', []))}\n"
             )
         text += "\n"
+    
     return text
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -181,7 +214,7 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(format_schedule_day(sched, d))
         return
 
-    if text == "рассписание на неделю":
+    if text == "расписание на неделю":
         await update.message.reply_text(format_schedule_week(sched))
         return
 
