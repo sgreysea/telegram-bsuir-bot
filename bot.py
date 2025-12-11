@@ -1,7 +1,7 @@
 import os
 import json
 import logging
-import threading
+import asyncio
 import urllib.request
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
@@ -30,15 +30,15 @@ logging.basicConfig(
     format="%(asctime)s — %(levelname)s — %(message)s"
 )
 
-# ============= FLASK ДЛЯ RENDER =================
+# ============= FLASK (для Render порта) =============
 
-app_web = Flask(__name__)
+app = Flask(__name__)
 
-@app_web.get("/")
+@app.get("/")
 def home():
     return "Bot is running!"
 
-# ================================================
+# ====================================================
 
 
 def load_users():
@@ -90,24 +90,10 @@ def get_current_week():
 def get_schedule(group):
     url = f"https://iis.bsuir.by/api/v1/schedule?studentGroup={group}"
     data = _http_get_json(url)
-
     if not data or "schedules" not in data:
         return None
-
     return data["schedules"]
 
-
-# === исправление твоей ошибки: дни берём по-английски ===
-
-DAY_EN = {
-    "monday": "Monday",
-    "tuesday": "Tuesday",
-    "wednesday": "Wednesday",
-    "thursday": "Thursday",
-    "friday": "Friday",
-    "saturday": "Saturday",
-    "sunday": "Sunday",
-}
 
 DAY_RU = {
     "Monday": "Понедельник",
@@ -122,16 +108,13 @@ DAY_RU = {
 
 def format_schedule_day(schedules, eng_day):
     week = get_current_week()
-
     lessons = schedules.get(eng_day, [])
     if not lessons:
         return f"{DAY_RU.get(eng_day, eng_day)}: занятий нет"
 
     text = f"Расписание на {DAY_RU[eng_day]}:\n\n"
-
     for lesson in lessons:
-        weeks = lesson.get("weekNumber")
-        if isinstance(weeks, list) and week not in weeks:
+        if isinstance(lesson.get("weekNumber"), list) and week not in lesson["weekNumber"]:
             continue
 
         text += (
@@ -139,20 +122,17 @@ def format_schedule_day(schedules, eng_day):
             f"{lesson['subject']} | "
             f"{', '.join(lesson.get('auditories', []))}\n"
         )
-
     return text
 
 
 def format_schedule_week(schedules):
     text = "Расписание на неделю:\n\n"
     for day, lessons in schedules.items():
-        ru_name = DAY_RU.get(day, day)
-        text += f"{ru_name}:\n"
-
+        ru = DAY_RU.get(day, day)
+        text += f"{ru}:\n"
         if not lessons:
             text += "  нет занятий\n\n"
             continue
-
         for lesson in lessons:
             text += (
                 f"  {lesson['startLessonTime']} - {lesson['endLessonTime']} | "
@@ -174,10 +154,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "ИНСТРУКЦИЯ:\n"
-        "1. нажми «установить группу»\n"
-        "2. введи номер\n"
-        "3. пользуйся меню\n\n",
+        "ИНСТРУКЦИЯ:\n1. нажми «установить группу»\n2. введи номер\n3. пользуйся меню",
         reply_markup=get_menu()
     )
 
@@ -200,9 +177,12 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         users[uid] = {"group": group, "notify": False}
         save_users(users)
-
         context.user_data["await_group"] = False
-        await update.message.reply_text(f"Группа {group} сохранена!", reply_markup=get_menu())
+
+        await update.message.reply_text(
+            f"Группа {group} сохранена!",
+            reply_markup=get_menu()
+        )
         return
 
     if uid not in users:
@@ -263,9 +243,9 @@ async def notifications(context: ContextTypes.DEFAULT_TYPE):
             await context.bot.send_message(chat_id=int(uid), text="через 10 минут первая пара!")
 
 
-# ================== BOT RUNNER ======================
+# ================== MAIN (единый asyncio loop) ===========================
 
-def run_bot():
+async def main():
     application = Application.builder().token(BOT_TOKEN).build()
 
     application.add_handler(CommandHandler("start", start))
@@ -274,14 +254,17 @@ def run_bot():
 
     application.job_queue.run_repeating(notifications, interval=30, first=10)
 
-    print("Bot is running...")
-    application.run_polling()
+    await application.initialize()
+    await application.start()
 
+    print("Bot started!")
 
-# ================== MAIN ===========================
+    # Flask запускаем в том же event loop
+    port = int(os.environ.get("PORT", 5000))
+    loop = asyncio.get_running_loop()
+    await loop.run_in_executor(None, lambda: app.run(host="0.0.0.0", port=port, debug=False))
+
+    await application.stop()
 
 if __name__ == "__main__":
-    threading.Thread(target=run_bot).start()
-
-    port = int(os.environ.get("PORT", 5000))
-    app_web.run(host="0.0.0.0", port=port)
+    asyncio.run(main())
