@@ -31,7 +31,6 @@ logging.basicConfig(
     format="%(asctime)s — %(levelname)s — %(message)s"
 )
 
-# ============= FLASK СЕРВЕР (ДЛЯ PORT HEALTH CHECK) =============
 app = Flask(__name__)
 
 @app.route("/")
@@ -45,8 +44,6 @@ def health():
 @app.route("/ping")
 def ping():
     return "pong", 200
-
-# ============= ФУНКЦИИ БОТА =============
 
 def load_users():
     if not os.path.exists(USERS_FILE):
@@ -123,8 +120,7 @@ def format_schedule_week(schedules):
         text += f" (неделя {current_week})"
     text += ":\n\n"
     
-    # Правильный порядок дней недели
-    days_order = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
+    # Словарь для перевода английских ключей в русские названия
     ru_days = {
         "monday": "Понедельник",
         "tuesday": "Вторник", 
@@ -135,8 +131,13 @@ def format_schedule_week(schedules):
         "sunday": "Воскресенье"
     }
     
+    # Правильный порядок дней недели (английские ключи)
+    days_order = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
+    
     for day_key in days_order:
         ru_day = ru_days.get(day_key, day_key)
+        
+        # Ищем расписание по английскому ключу
         lessons = schedules.get(day_key, [])
         
         text += f"{ru_day}:\n"
@@ -159,8 +160,12 @@ def format_schedule_week(schedules):
             if isinstance(weeks, list):
                 if current_week in weeks:
                     filtered_lessons.append(lesson)
-            # Если неделя как число 1
-            elif isinstance(weeks, int) or (isinstance(weeks, str) and weeks.isdigit()):
+            # Если неделя как число
+            elif isinstance(weeks, int):
+                if weeks == current_week:
+                    filtered_lessons.append(lesson)
+            # Если неделя как строка-число
+            elif isinstance(weeks, str) and weeks.isdigit():
                 if int(weeks) == current_week:
                     filtered_lessons.append(lesson)
         
