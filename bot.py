@@ -258,9 +258,8 @@ def run_flask_server():
     app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
 
 def run_telegram_bot():
-    """Запуск Telegram бота в отдельном потоке"""
+    """Запуск Telegram бота с Webhook"""
     try:
-        # Создаем новое asyncio событие для этого потока
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         
@@ -273,24 +272,70 @@ def run_telegram_bot():
         
         application.job_queue.run_repeating(notifications, interval=30, first=10)
         
-        logging.info("🤖 Telegram Bot запускается...")
+        logging.info("🤖 Telegram Bot запускается с Webhook...")
         
-        # Запускаем бота в этом event loop
+        # ЗАПУСКАЕМ БОТА В ЭТОМ ПОТОКЕ
         loop.run_until_complete(application.initialize())
         loop.run_until_complete(application.start())
-        logging.info("✅ Telegram Bot запущен и работает")
         
-        # Запускаем polling
-        loop.run_until_complete(application.updater.start_polling())
+        # 1. Получаем порт из переменных окружения Render
+        port = int(os.environ.get("PORT", 10000))
         
-        # Держим loop активным
-        loop.run_forever()
+        # 2. Получаем публичный URL вашего приложения
+        # На Render это обычно: https://your-app-name.onrender.com
+        # Нужно установить переменную окружения RENDER_EXTERNAL_URL
+        webhook_url = os.environ.get("RENDER_EXTERNAL_URL")
+        
+        if not webhook_url:
+            # Если переменной нет, можно сгенерировать из имени приложения
+            render_service_name = os.environ.get("RENDER_SERVICE_NAME", "")
+            if render_service_name:
+                webhook_url = f"https://{render_service_name}.onrender.com"
+            else:
+                # Fallback: для локального тестирования
+                webhook_url = f"https://example.com"  # Нужно заменить на реальный
+        
+        # 3. Настраиваем Webhook
+        webhook_path = "/webhook"  # Путь для webhook
+        full_webhook_url = f"{webhook_url}{webhook_path}"
+        
+        logging.info(f"🌐 Настраиваю Webhook: {full_webhook_url}")
+        
+        # 4. Запускаем Webhook
+        loop.run_until_complete(
+            application.bot.set_webhook(
+                url=full_webhook_url,
+                secret_token="YOUR_SECRET_TOKEN"  # Опционально для безопасности
+            )
+        )
+        
+        # 5. Запускаем Flask в ЭТОМ ЖЕ ПОТОКЕ (важно!)
+        from flask import request
+        
+        @app.route(webhook_path, methods=['POST'])
+        async def webhook():
+            """Обработчик webhook от Telegram"""
+            if request.headers.get('content-type') == 'application/json':
+                json_string = await request.get_data()
+                update = Update.de_json(json.loads(json_string), application.bot)
+                await application.process_update(update)
+            return '', 200
+        
+        @app.route("/check-notifications")
+        def check_notifications():
+            """Старый endpoint для уведомлений - оставляем для UptimeRobot"""
+            # ... ваш существующий код ...
+            pass
+        
+        logging.info(f"✅ Telegram Bot готов! Webhook настроен на {full_webhook_url}")
+        logging.info(f"📡 Сервер запускается на порту {port}")
+        
+        # 6. Запускаем Flask (он будет обрабатывать и webhook, и health checks)
+        # Удаляем use_reloader, так как он создает дополнительные процессы
+        app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
         
     except Exception as e:
         logging.error(f"❌ Ошибка запуска Telegram бота: {e}")
 
 if __name__ == "__main__":
-    bot_thread = threading.Thread(target=run_telegram_bot, daemon=True)
-    bot_thread.start()
-    
-    run_flask_server()
+    run_telegram_bot()
