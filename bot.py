@@ -115,12 +115,15 @@ def format_schedule_day(schedules, day):
 def format_schedule_week(schedules):
     current_week = get_current_week()
     
+    # ОТЛАДОЧНЫЙ ВЫВОД
+    logging.info(f"Текущая неделя для расписания на неделю: {current_week}")
+    
     text = "расписание на неделю"
     if current_week:
         text += f" (неделя {current_week})"
     text += ":\n\n"
     
-    # Словарь для перевода английских ключей в русские названия
+    # Словарь для перевода
     ru_days = {
         "monday": "Понедельник",
         "tuesday": "Вторник", 
@@ -131,13 +134,10 @@ def format_schedule_week(schedules):
         "sunday": "Воскресенье"
     }
     
-    # Правильный порядок дней недели (английские ключи)
     days_order = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
     
     for day_key in days_order:
         ru_day = ru_days.get(day_key, day_key)
-        
-        # Ищем расписание по английскому ключу
         lessons = schedules.get(day_key, [])
         
         text += f"{ru_day}:\n"
@@ -146,41 +146,16 @@ def format_schedule_week(schedules):
             text += "  нет занятий\n\n"
             continue
         
-        # ФИЛЬТРАЦИЯ по текущей неделе
-        filtered_lessons = []
+        # ВРЕМЕННО: НЕ ФИЛЬТРУЕМ ВООБЩЕ!
+        # Просто показываем все занятия
         for lesson in lessons:
-            weeks = lesson.get("weekNumber")
-            
-            # Если нет информации о неделях - показываем
-            if weeks is None:
-                filtered_lessons.append(lesson)
-                continue
-            
-            # Если неделя как список [1, 3, 5]
-            if isinstance(weeks, list):
-                if current_week in weeks:
-                    filtered_lessons.append(lesson)
-            # Если неделя как число
-            elif isinstance(weeks, int):
-                if weeks == current_week:
-                    filtered_lessons.append(lesson)
-            # Если неделя как строка-число
-            elif isinstance(weeks, str) and weeks.isdigit():
-                if int(weeks) == current_week:
-                    filtered_lessons.append(lesson)
-        
-        if not filtered_lessons:
-            text += "  нет занятий на этой неделе\n\n"
-            continue
-        
-        # Сортируем по времени
-        filtered_lessons.sort(key=lambda x: x.get('startLessonTime', '00:00'))
-        
-        for lesson in filtered_lessons:
+            # Всегда показываем информацию о неделе
+            weeks = lesson.get('weekNumber', 'не указано')
             text += (
                 f"  {lesson['startLessonTime']} - {lesson['endLessonTime']} | "
                 f"{lesson['subject']} | "
-                f"{', '.join(lesson.get('auditories', []))}\n"
+                f"{', '.join(lesson.get('auditories', []))} | "
+                f"недели: {weeks}\n"
             )
         text += "\n"
     
