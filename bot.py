@@ -116,20 +116,69 @@ def format_schedule_day(schedules, day):
     return text
 
 def format_schedule_week(schedules):
-    text = "расписание на неделю:\n\n"
-    for day, lessons in schedules.items():
-        text += f"{day}:\n"
+    current_week = get_current_week()
+    
+    text = "расписание на неделю"
+    if current_week:
+        text += f" (неделя {current_week})"
+    text += ":\n\n"
+    
+    # Правильный порядок дней недели
+    days_order = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
+    ru_days = {
+        "monday": "Понедельник",
+        "tuesday": "Вторник", 
+        "wednesday": "Среда",
+        "thursday": "Четверг",
+        "friday": "Пятница",
+        "saturday": "Суббота",
+        "sunday": "Воскресенье"
+    }
+    
+    for day_key in days_order:
+        ru_day = ru_days.get(day_key, day_key)
+        lessons = schedules.get(day_key, [])
+        
+        text += f"{ru_day}:\n"
+        
         if not lessons:
             text += "  нет занятий\n\n"
             continue
-
+        
+        # ФИЛЬТРАЦИЯ по текущей неделе
+        filtered_lessons = []
         for lesson in lessons:
+            weeks = lesson.get("weekNumber")
+            
+            # Если нет информации о неделях - показываем
+            if weeks is None:
+                filtered_lessons.append(lesson)
+                continue
+            
+            # Если неделя как список [1, 3, 5]
+            if isinstance(weeks, list):
+                if current_week in weeks:
+                    filtered_lessons.append(lesson)
+            # Если неделя как число 1
+            elif isinstance(weeks, int) or (isinstance(weeks, str) and weeks.isdigit()):
+                if int(weeks) == current_week:
+                    filtered_lessons.append(lesson)
+        
+        if not filtered_lessons:
+            text += "  нет занятий на этой неделе\n\n"
+            continue
+        
+        # Сортируем по времени
+        filtered_lessons.sort(key=lambda x: x.get('startLessonTime', '00:00'))
+        
+        for lesson in filtered_lessons:
             text += (
                 f"  {lesson['startLessonTime']} - {lesson['endLessonTime']} | "
                 f"{lesson['subject']} | "
                 f"{', '.join(lesson.get('auditories', []))}\n"
             )
         text += "\n"
+    
     return text
 
 
