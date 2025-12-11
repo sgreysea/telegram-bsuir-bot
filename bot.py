@@ -259,18 +259,27 @@ async def notifications(context: ContextTypes.DEFAULT_TYPE):
 # ================== WEBHOOK РОУТЫ ========================
 
 @app.post("/webhook")
-async def webhook():
-    """Основной эндпоинт для получения обновлений от Telegram"""
-    if request.is_json:
-        try:
-            data = await request.get_json()
-            update = Update.de_json(data, telegram_app.bot)
-            await telegram_app.process_update(update)
-            return "", 200
-        except Exception as e:
-            logging.error(f"Ошибка обработки webhook: {e}")
-            return "error", 400
-    return "bad request", 400
+def webhook():
+    """Упрощенный обработчик webhook"""
+    import threading
+    
+    # Получаем данные
+    data = request.get_json()
+    if not data:
+        return "no data", 400
+    
+    # Создаем Update
+    update = Update.de_json(data, telegram_app.bot)
+    
+    # Запускаем обработку в отдельном потоке
+    def process_update_async(update):
+        asyncio.run(telegram_app.process_update(update))
+    
+    thread = threading.Thread(target=process_update_async, args=(update,))
+    thread.daemon = True
+    thread.start()
+    
+    return "ok", 200
 
 @app.get("/")
 def home():
