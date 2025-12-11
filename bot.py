@@ -91,160 +91,47 @@ def get_current_week():
 def get_schedule(group):
     url = f"https://iis.bsuir.by/api/v1/schedule?studentGroup={group}"
     data = _http_get_json(url)
+
     if not data or "schedules" not in data:
         return None
-    # нормализуем ключи → в нижний регистр
-    normalized = {day.lower(): lessons for day, lessons in data["schedules"].items()}
-    return normalized
 
-DAY_RU = {
-    "monday": "Понедельник",
-    "tuesday": "Вторник", 
-    "wednesday": "Среда",
-    "thursday": "Четверг",
-    "friday": "Пятница",
-    "saturday": "Суббота",
-    "sunday": "Воскресенье"
-}
-WEEK_ORDER = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+    return data["schedules"]
 
-def format_schedule_day(schedules, day_key, ru_day):
-    """Расписание на день с фильтрацией по неделе"""
-    current_week = get_current_week()
-    lessons = schedules.get(day_key, [])  # Используем day_key (строчный)
-    
+def format_schedule_day(schedules, day):
+    week = get_current_week()
+    lessons = schedules.get(day, [])
     if not lessons:
-        return f"{ru_day}: занятий нет"
-    
-    # ФИЛЬТРУЕМ по текущей неделе
-    filtered_lessons = []
+        return f"{day}: занятий нет"
+    text = f"расписание на {day}:\n\n"
     for lesson in lessons:
         weeks = lesson.get("weekNumber")
-        
-        # Если нет информации о неделях - показываем занятие
-        if weeks is None:
-            filtered_lessons.append(lesson)
+        # check by week
+        if isinstance(weeks, list) and week not in weeks:
             continue
-        
-        # Если неделя указана как список [1, 3, 5]
-        if isinstance(weeks, list):
-            # Преобразуем все элементы списка в int
-            week_numbers = []
-            for w in weeks:
-                try:
-                    week_numbers.append(int(w))
-                except:
-                    continue
-            
-            # Показываем ВСЕ занятия для отладки
-            filtered_lessons.append(lesson)
-            # Раскомментируйте когда заработает:
-            # if current_week in week_numbers:
-            #     filtered_lessons.append(lesson)
-        
-        # Если неделя указана как число
-        else:
-            try:
-                week_num = int(weeks)
-                # Показываем ВСЕ занятия для отладки
-                filtered_lessons.append(lesson)
-                # Раскомментируйте когда заработает:
-                # if week_num == current_week:
-                #     filtered_lessons.append(lesson)
-            except:
-                filtered_lessons.append(lesson)
-    
-    if not filtered_lessons:
-        return f"{ru_day}: нет занятий на этой неделе"
-    
-    text = f"расписание на {ru_day}"
-    if current_week:
-        text += f" (неделя {current_week})"
-    text += ":\n\n"
-    
-    # Сортируем по времени
-    filtered_lessons.sort(key=lambda x: x.get('startLessonTime', '00:00'))
-    
-    for lesson in filtered_lessons:
-        subject = lesson.get('subject', 'Не указано')
-        start_time = lesson.get('startLessonTime', '??:??')
-        end_time = lesson.get('endLessonTime', '??:??')
-        auditories = ', '.join(lesson.get('auditories', [])) or 'не указана'
-        week_num = lesson.get('weekNumber', '?')
-        
-        # Для отладки показываем номер недели
-        text += f"{start_time} - {end_time} | {subject} | {auditories} [нед: {week_num}]\n"
-    
+        text += (
+            f"{lesson['startLessonTime']} - {lesson['endLessonTime']} | "
+            f"{lesson['subject']} | "
+            f"{', '.join(lesson.get('auditories', []))}\n"
+        )
     return text
 
 def format_schedule_week(schedules):
-    """Расписание на неделю ТОЛЬКО на текущую неделю"""
-    current_week = get_current_week()
-    
-    text = "расписание на неделю"
-    if current_week:
-        text += f" (неделя {current_week})"
-    text += ":\n\n"
-    
-    # Правильный порядок дней
-    days_order = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
-    
-    for day in days_order:
-        ru_day = {
-            "monday": "Понедельник",
-            "tuesday": "Вторник", 
-            "wednesday": "Среда",
-            "thursday": "Четверг",
-            "friday": "Пятница",
-            "saturday": "Суббота",
-            "sunday": "Воскресенье"
-        }.get(day, day)
-        
-        lessons = schedules.get(day, [])
-        text += f"{ru_day}:\n"
-        
+    text = "расписание на неделю:\n\n"
+    for day, lessons in schedules.items():
+        text += f"{day}:\n"
         if not lessons:
             text += "  нет занятий\n\n"
             continue
-        
-        # ФИЛЬТРУЕМ по текущей неделе
-        filtered_lessons = []
+
         for lesson in lessons:
-            weeks = lesson.get("weekNumber")
-            
-            # Если нет информации о неделях - показываем
-            if weeks is None:
-                filtered_lessons.append(lesson)
-                continue
-            
-            # Если неделя как список [1, 3, 5]
-            if isinstance(weeks, list):
-                if current_week in weeks:
-                    filtered_lessons.append(lesson)
-            # Если неделя как число 1
-            else:
-                # Пробуем преобразовать в число
-                try:
-                    week_num = int(weeks)
-                    if week_num == current_week:
-                        filtered_lessons.append(lesson)
-                except:
-                    # Если не получается - показываем
-                    filtered_lessons.append(lesson)
-        
-        if not filtered_lessons:
-            text += "  нет занятий на этой неделе\n\n"
-            continue
-        
-        for lesson in filtered_lessons:
             text += (
                 f"  {lesson['startLessonTime']} - {lesson['endLessonTime']} | "
                 f"{lesson['subject']} | "
                 f"{', '.join(lesson.get('auditories', []))}\n"
             )
         text += "\n"
-    
     return text
+
 
 # ============= ОБРАБОТЧИКИ ТЕЛЕГРАМ =============
 
