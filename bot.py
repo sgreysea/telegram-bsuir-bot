@@ -112,54 +112,40 @@ def format_schedule_day(schedules, day):
         )
     return text
 
-def format_schedule_week(schedules):
-    current_week = get_current_week()
-    
-    # ОТЛАДОЧНЫЙ ВЫВОД
-    logging.info(f"Текущая неделя для расписания на неделю: {current_week}")
-    
-    text = "расписание на неделю"
-    if current_week:
-        text += f" (неделя {current_week})"
-    text += ":\n\n"
-    
-    # Словарь для перевода
+def format_schedule_day(schedules, day_eng):
     ru_days = {
         "monday": "Понедельник",
-        "tuesday": "Вторник", 
+        "tuesday": "Вторник",
         "wednesday": "Среда",
         "thursday": "Четверг",
         "friday": "Пятница",
         "saturday": "Суббота",
         "sunday": "Воскресенье"
     }
-    
-    days_order = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
-    
-    for day_key in days_order:
-        ru_day = ru_days.get(day_key, day_key)
-        lessons = schedules.get(day_key, [])
-        
-        text += f"{ru_day}:\n"
-        
-        if not lessons:
-            text += "  нет занятий\n\n"
+
+    day_ru = ru_days.get(day_eng, day_eng)
+
+    week = get_current_week()
+    lessons = schedules.get(day_eng, [])
+
+    if not lessons:
+        return f"{day_ru}: занятий нет"
+
+    text = f"Расписание на {day_ru}:\n\n"
+
+    for lesson in lessons:
+        weeks = lesson.get("weekNumber")
+        if isinstance(weeks, list) and week not in weeks:
             continue
-        
-        # ВРЕМЕННО: НЕ ФИЛЬТРУЕМ ВООБЩЕ!
-        # Просто показываем все занятия
-        for lesson in lessons:
-            # Всегда показываем информацию о неделе
-            weeks = lesson.get('weekNumber', 'не указано')
-            text += (
-                f"  {lesson['startLessonTime']} - {lesson['endLessonTime']} | "
-                f"{lesson['subject']} | "
-                f"{', '.join(lesson.get('auditories', []))} | "
-                f"недели: {weeks}\n"
-            )
-        text += "\n"
-    
+
+        text += (
+            f"{lesson['startLessonTime']} - {lesson['endLessonTime']} | "
+            f"{lesson['subject']} | "
+            f"{', '.join(lesson.get('auditories', []))}\n"
+        )
+
     return text
+
 
 
 # ============= ОБРАБОТЧИКИ ТЕЛЕГРАМ =============
@@ -224,13 +210,15 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
     }
 
     if text == "расписание на сегодня":
-        d = ru[datetime.now().strftime("%A").lower()]
-        await update.message.reply_text(format_schedule_day(sched, d))
+        day_eng = datetime.now().strftime("%A").lower()
+        await update.message.reply_text(format_schedule_day(sched, day_eng))
+
         return
 
     if text == "расписание на завтра":
-        d = ru[(datetime.now() + timedelta(days=1)).strftime("%A").lower()]
-        await update.message.reply_text(format_schedule_day(sched, d))
+        day_eng = (datetime.now() + timedelta(days=1)).strftime("%A").lower()
+        await update.message.reply_text(format_schedule_day(sched, day_eng))
+
         return
 
     if text == "рассписание на неделю":
