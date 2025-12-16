@@ -19,7 +19,7 @@ load_dotenv()
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 if not BOT_TOKEN:
-    print("ERROR: BOT_TOKEN not found in .env")
+    print("ERROR: BOT_TOKEN не нашелся .env")
     exit(1)
 
 USERS_FILE = "users.json"
@@ -87,7 +87,6 @@ def format_schedule_day(schedules, day):
     text = f"расписание на {day}:\n\n"
     for lesson in lessons:
         weeks = lesson.get("weekNumber")
-        # check by week
         if isinstance(weeks, list) and week not in weeks:
             continue
         text += (
@@ -97,22 +96,47 @@ def format_schedule_day(schedules, day):
         )
     return text
 
-def format_schedule_week(schedules):
-    text = "расписание на неделю:\n\n"
-    for day, lessons in schedules.items():
-        text += f"{day}:\n"
-        if not lessons:
-            text += "  нет занятий\n\n"
-            continue
+week_order = [
+    "Понедельник",
+    "Вторник",
+    "Среда",
+    "Четверг",
+    "Пятница",
+    "Суббота",
+    "Воскресенье"
+]
 
+def format_schedule_week(schedules):
+    week = get_current_week()
+    text = f"расписание на {week}-ю неделю:\n\n"
+
+    for day in week_order:
+        lessons = schedules.get(day, [])
+        text += f"{day}:\n"
+
+        shown = False
         for lesson in lessons:
+            weeks = lesson.get("weekNumber")
+
+            # Фильтр по неделям
+            if isinstance(weeks, list) and week not in weeks:
+                continue
+
+            shown = True
             text += (
                 f"  {lesson['startLessonTime']} - {lesson['endLessonTime']} | "
                 f"{lesson['subject']} | "
                 f"{', '.join(lesson.get('auditories', []))}\n"
             )
+
+        if not shown:
+            text += "  нет занятий\n"
+
         text += "\n"
+
     return text
+
+
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
@@ -123,14 +147,17 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "ИНСТРУКЦИЯ:\n"
         "1. нажми «установить группу»\n"
-        "2. введи номер\n"
-        "3. пользуйся меню\n\n",
+        "2. введи номер своей группы\n"
+        "3. пользуйся меню чтобы вывести расписание\n\n",
         reply_markup=get_menu()
     )
 
 async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.lower()
     uid = str(update.message.from_user.id)
+
+    if text == "помощь":
+        await help_cmd(update, context)
 
     if text == "установить группу":
         context.user_data["await_group"] = True
@@ -151,11 +178,13 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"Группа {group} сохранена!", reply_markup=get_menu())
         return
 
-    if uid not in users:
+    user = users.get(uid)
+    if not user or "group" not in user:
         await update.message.reply_text("сначала установи группу.")
         return
 
-    group = users[uid]["group"]
+    group = user["group"]
+
     sched = get_schedule(group)
     if not sched:
         await update.message.reply_text("ошибка загрузки расписания")
@@ -193,31 +222,112 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=get_menu()
         )
         return
+    if uid not in users:
+        await update.message.reply_text("сначала установи группу.")
+        return
 
-    if text == "помощь":
-        await help_cmd(update, context)
+def get_ru_weekday(dt=None):
+    if dt is None:
+        dt = datetime.now()
+    ru_days = {
+        0: "Понедельник",
+        1: "Вторник",
+        2: "Среда",
+        3: "Четверг",
+        4: "Пятница",
+        5: "Суббота",
+        6: "Воскресенье",
+    }
+    return ru_days[dt.weekday()]
 
+sent_notifications = {}  
 
 async def notifications(context: ContextTypes.DEFAULT_TYPE):
-    now = datetime.now().strftime("%H:%M")
-    weekday = datetime.now().strftime("%A")
+    global users, sent_notifications
+    users = load_users()
+
+    now = datetime.now()
+    now_time = now.time()
+    weekday = get_ru_weekday()
+
+    current_week = get_current_week()
+    if not current_week:
+        return
 
     for uid, data in users.items():
-        if not data["notify"]:
+
+        if not data.get("notify", False):
             continue
 
-        sched = get_schedule(data["group"])
-        lessons = sched.get(weekday, [])
+        if uid not in sent_notifications:
+            sent_notifications[uid] = {"next10": set()}
 
-        if not lessons:
+        try:
+            sched = get_schedule(data["group"])
+            if not sched:
+                continue
+
+            lessons = sched.get(weekday, [])
+            if not lessons:
+                continue
+
+            # сортировка по времени
+            try:
+                lessons = sorted(
+                    lessons,
+                    key=lambda x: datetime.strptime(x["startLessonTime"], "%H:%M")
+                )
+            except:
+                pass
+
+            for i, lesson in enumerate(lessons):
+                # Фильтруем по неделе
+                weeks = lesson.get("weekNumber")
+                if isinstance(weeks, list) and current_week not in weeks:
+                    continue
+                # время пары
+                try:
+                    start_t = datetime.strptime(lesson["startLessonTime"], "%H:%M").time()
+                    end_t = datetime.strptime(lesson["endLessonTime"], "%H:%M").time()
+                except:
+                    continue
+                start_dt = datetime.combine(now.date(), start_t)
+                end_dt = datetime.combine(now.date(), end_t)
+                now_dt = datetime.combine(now.date(), now_time)
+                if start_t <= now_time <= end_t:
+                    minutes_left = (end_dt - now_dt).total_seconds() / 60
+                    if 9 <= minutes_left <= 11:   # окно 30 секунд
+                        # нельзя слать повторно
+                        notif_key = f"{lesson['startLessonTime']}_next10"
+                        if notif_key in sent_notifications[uid]["next10"]:
+                            continue
+                        sent_notifications[uid]["next10"].add(notif_key)
+                        # ищем следующую пару
+                        if i + 1 < len(lessons):
+                            next_lesson = lessons[i + 1]
+                            # фильтруем по неделе
+                            next_weeks = next_lesson.get("weekNumber")
+                            if isinstance(next_weeks, list) and current_week not in next_weeks:
+                                continue
+
+                            subject = next_lesson.get("subject", "следующая пара")
+                            aud = next_lesson.get("auditories", ["ауд. не указана"])[0]
+                            next_start = next_lesson["startLessonTime"]
+                            next_end = next_lesson["endLessonTime"]
+
+                            msg = (
+                                f"через 10 минут закончится пара\n\n"
+                                f"следующая пара:\n"
+                                f"{subject}\n"
+                                f"{next_start}-{next_end}\n"
+                                f"{aud}"
+                            )
+
+                            await context.bot.send_message(chat_id=int(uid), text=msg)
+
+        except Exception as e:
+            logging.error(f"ошибка пользователя? {uid}: {e}")
             continue
-
-        first = lessons[0]["startLessonTime"]
-        before10 = (datetime.strptime(first, "%H:%M") - timedelta(minutes=10)).strftime("%H:%M")
-
-        if now == before10:
-            await context.bot.send_message(chat_id=int(uid), text="через 10 минут первая пара!")
-
 
 def main():
     app = Application.builder().token(BOT_TOKEN).build()
